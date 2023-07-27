@@ -99,7 +99,7 @@ int main(void)
 	}
 
 #ifdef CONFIG_LORAWAN_APP_CLOCK_SYNC
-	lorawan_clock_sync_run();
+	lorawan_clock_sync_run(NULL, NULL);
 #endif
 
 	LOG_INF("Sending data...");
