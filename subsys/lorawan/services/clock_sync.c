@@ -12,6 +12,7 @@
 #include "lorawan_services.h"
 
 #include <LoRaMac.h>
+#include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/lorawan/lorawan.h>
 #include <zephyr/logging/log.h>
@@ -58,8 +59,17 @@ struct clock_sync_context {
 	 * Valid range between 128 (0x80) and 8388608 (0x800000)
 	 */
 	uint32_t periodicity;
+	/**
+	 * AppTimeReq retransmission interval in seconds while the clock is not synchronized
+	 *
+	 * Valid range between 128 (0x80) and 8388608 (0x800000)
+	 */
+	uint32_t not_sync_periodicity;
 	/** Indication if at least one valid time correction was received */
 	bool synchronized;
+
+	lorawan_clock_sync_clbk clbk;
+	void *user_data;
 };
 
 static struct clock_sync_context ctx;
@@ -87,12 +97,14 @@ static int clock_sync_serialize_device_time(uint8_t *buf, size_t size)
 
 static inline k_timeout_t clock_sync_calc_periodicity(void)
 {
-	/* add +-30s jitter to nominal periodicity as required by the spec */
-	return K_SECONDS(ctx.periodicity - 30 + sys_rand32_get() % 61);
+	/* Add +-30s jitter to actual periodicity as required */
+	uint32_t periodicity = ctx.synchronized ? ctx.periodicity : ctx.not_sync_periodicity;
+	periodicity += sys_rand32_get() % 61 - 30;
+	return K_SECONDS(periodicity);
 }
 
 static void clock_sync_package_callback(uint8_t port, bool data_pending, int16_t rssi, int8_t snr,
-					uint8_t len, const uint8_t *rx_buf)
+					uint8_t len, const uint8_t *rx_buf, void *user_data)
 {
 	uint8_t tx_buf[3 * MAX_CLOCK_SYNC_ANS_LEN];
 	uint8_t tx_pos = 0;
@@ -135,6 +147,10 @@ static void clock_sync_package_callback(uint8_t port, bool data_pending, int16_t
 
 				LOG_DBG("AppTimeAns time_correction %d (token %d)",
 					time_correction, token);
+
+				if (ctx.clbk) {
+					ctx.clbk(ctx.user_data);
+				}
 			} else {
 				LOG_WRN("AppTimeAns with outdated token %d", token);
 			}
@@ -233,14 +249,34 @@ static struct lorawan_downlink_cb downlink_cb = {
 	.cb = clock_sync_package_callback
 };
 
-int lorawan_clock_sync_run(void)
+int lorawan_clock_sync_run(lorawan_clock_sync_clbk clbk, void *user_data)
+{
+	ctx.clbk = clbk;
+	ctx.user_data = user_data;
+
+	lorawan_services_reschedule_work(&ctx.resync_work, K_NO_WAIT);
+	return 0;
+}
+
+int lorawan_clock_sync_stop(void)
+{
+	struct k_work_sync sync;
+	return k_work_cancel_delayable_sync(&ctx.resync_work, &sync);
+}
+
+int lorawan_clock_sync_init(void)
 {
 	ctx.periodicity = CONFIG_LORAWAN_APP_CLOCK_SYNC_PERIODICITY;
+	ctx.not_sync_periodicity = CONFIG_LORAWAN_APP_CLOCK_NOT_SYNC_PERIODICITY;
+
+	ctx.clbk = NULL;
+	ctx.user_data = NULL;
 
 	lorawan_register_downlink_callback(&downlink_cb);
 
 	k_work_init_delayable(&ctx.resync_work, clock_sync_resync_handler);
-	lorawan_services_reschedule_work(&ctx.resync_work, K_NO_WAIT);
 
 	return 0;
 }
+
+SYS_INIT(lorawan_clock_sync_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
