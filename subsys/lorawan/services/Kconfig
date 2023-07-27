@@ -54,4 +54,17 @@ config LORAWAN_APP_CLOCK_SYNC_PERIODICITY
 
 	  Default setting: 24h.
 
+config LORAWAN_APP_CLOCK_NOT_SYNC_PERIODICITY
+	int "Application Layer Clock Synchronization not synchronized periodicity"
+	depends on LORAWAN_APP_CLOCK_SYNC
+	range 128 4194304
+	default 128
+	help
+	  Initial setting for clock synchronization periodicity in seconds.
+
+	  The value can be updated remotely by the application server within a
+	  range from 128 (0x80) to 4194304 (0x400000).
+
+	  Default setting: 2min.
+
 endif # LORAWAN_SERVICES
