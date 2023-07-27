@@ -154,6 +154,18 @@ config LORAWAN_FRAG_TRANSPORT_MAX_REDUNDANCY
 	  firmware image.
 
 	  This setting has significant influence on RAM usage.
+config LORAWAN_APP_CLOCK_NOT_SYNC_PERIODICITY
+	int "Application Layer Clock Synchronization not synchronized periodicity"
+	depends on LORAWAN_APP_CLOCK_SYNC
+	range 128 4194304
+	default 128
+	help
+	  Initial setting for clock synchronization periodicity in seconds.
+
+	  The value can be updated remotely by the application server within a
+	  range from 128 (0x80) to 4194304 (0x400000).
+
+	  Default setting: 2min.
 
 config LORAWAN_REMOTE_MULTICAST
 	bool "Remote Multicast Setup"
