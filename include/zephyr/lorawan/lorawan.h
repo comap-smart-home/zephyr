@@ -320,6 +320,8 @@ int lorawan_set_region(enum lorawan_region region);
 
 #ifdef CONFIG_LORAWAN_APP_CLOCK_SYNC
 
+typedef void (*lorawan_clock_sync_clbk)(void *user_data);
+
 /**
  * @brief Run Application Layer Clock Synchronization service
  *
@@ -330,9 +332,11 @@ int lorawan_set_region(enum lorawan_region region);
  * Clock synchronization is required for firmware upgrades over multicast
  * sessions, but can also be used independent of a FUOTA process.
  *
+ * @param clbk Callback to be called once the clock is synchronized
+ * @param user_data Data to be passed to the callback
  * @return 0 if successful, negative errno otherwise.
  */
-int lorawan_clock_sync_run(void);
+int lorawan_clock_sync_run(lorawan_clock_sync_clbk clbk, void *user_data);
 
 /**
  * @brief Retrieve the current synchronized time
