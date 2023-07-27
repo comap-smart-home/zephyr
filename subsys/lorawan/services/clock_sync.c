@@ -58,8 +58,17 @@ struct clock_sync_context {
 	 * Valid range between 128 (0x80) and 8388608 (0x800000)
 	 */
 	uint32_t periodicity;
+	/**
+	 * AppTimeReq retransmission interval in seconds while the clock is not synchronized
+	 *
+	 * Valid range between 128 (0x80) and 8388608 (0x800000)
+	 */
+	uint32_t not_sync_periodicity;
 	/** Indication if at least one valid time correction was received */
 	bool synchronized;
+
+	lorawan_clock_sync_clbk clbk;
+	void *user_data;
 };
 
 static struct clock_sync_context ctx;
@@ -129,6 +138,10 @@ static void clock_sync_package_callback(uint8_t port, bool data_pending, int16_t
 
 				LOG_DBG("AppTimeAns time_correction %d (token %d)",
 					time_correction, token);
+
+				if (ctx.clbk) {
+					ctx.clbk(ctx.user_data);
+				}
 			} else {
 				LOG_WRN("AppTimeAns with outdated token %d", token);
 			}
@@ -200,7 +213,8 @@ static void clock_sync_resync_handler(struct k_work *work)
 	clock_sync_app_time_req();
 
 	/* Add +-30s jitter to actual periodicity as required */
-	periodicity = ctx.periodicity - 30 + sys_rand32_get() % 61;
+	periodicity = ctx.synchronized ? ctx.periodicity : ctx.not_sync_periodicity;
+	periodicity += sys_rand32_get() % 61 - 30;
 
 	lorawan_services_reschedule_work(&ctx.resync_work, K_SECONDS(periodicity));
 }
@@ -222,9 +236,13 @@ static struct lorawan_downlink_cb downlink_cb = {
 	.cb = clock_sync_package_callback
 };
 
-int lorawan_clock_sync_run(void)
+int lorawan_clock_sync_run(lorawan_clock_sync_clbk clbk, void *user_data)
 {
 	ctx.periodicity = CONFIG_LORAWAN_APP_CLOCK_SYNC_PERIODICITY;
+	ctx.not_sync_periodicity = CONFIG_LORAWAN_APP_CLOCK_NOT_SYNC_PERIODICITY;
+
+	ctx.clbk = clbk;
+	ctx.user_data = user_data;
 
 	lorawan_register_downlink_callback(&downlink_cb);
 
