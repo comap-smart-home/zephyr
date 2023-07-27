@@ -23,6 +23,8 @@ manifest:
       url-base: https://github.com/zephyrproject-rtos
     - name: babblesim
       url-base: https://github.com/BabbleSim
+    - name: csh-github
+      url-base: https://github.com/comap-smart-home
 
   group-filter: [-babblesim]
 
@@ -254,7 +256,8 @@ manifest:
         - fs
       revision: ca583fd297ceb48bced3c2548600dc615d67af24
     - name: loramac-node
-      revision: ce57712f3e426bbbb13acaec97b45369f716f43a
+      remote: csh-github
+      revision: c9804a57ec578c3bfc644bca0ef53420ea183db1
       path: modules/lib/loramac-node
     - name: lvgl
       revision: 7102083f626cda09e5792420ea60af0525cce9ae
