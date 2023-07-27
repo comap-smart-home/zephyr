@@ -29,7 +29,7 @@ char data[] = {'h', 'e', 'l', 'l', 'o', 'w', 'o', 'r', 'l', 'd'};
 
 static void dl_callback(uint8_t port, bool data_pending,
 			int16_t rssi, int8_t snr,
-			uint8_t len, const uint8_t *hex_data)
+			uint8_t len, const uint8_t *hex_data, void *user_data)
 {
 	LOG_INF("Port %d, Pending %d, RSSI %ddB, SNR %ddBm", port, data_pending, rssi, snr);
 	if (hex_data) {
@@ -37,7 +37,7 @@ static void dl_callback(uint8_t port, bool data_pending,
 	}
 }
 
-static void lorwan_datarate_changed(enum lorawan_datarate dr)
+static void lorwan_datarate_changed(enum lorawan_datarate dr, void *user_data)
 {
 	uint8_t unused, max_size;
 
@@ -83,7 +83,7 @@ int main(void)
 	}
 
 	lorawan_register_downlink_callback(&downlink_cb);
-	lorawan_register_dr_changed_callback(lorwan_datarate_changed);
+	lorawan_register_dr_changed_callback(lorwan_datarate_changed, NULL);
 
 	join_cfg.mode = LORAWAN_ACT_OTAA;
 	join_cfg.dev_eui = dev_eui;

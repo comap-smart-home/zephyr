@@ -189,7 +189,13 @@ struct lorawan_downlink_cb {
 	 */
 	void (*cb)(uint8_t port, bool data_pending,
 		   int16_t rssi, int8_t snr,
-		   uint8_t len, const uint8_t *data);
+		   uint8_t len, const uint8_t *data, void *user_data);
+
+	/**
+	 * @brief User data to be passed to the callback
+	 * 
+	 */
+	void *user_data;
 	/** Node for callback list */
 	sys_snode_t node;
 };
@@ -207,8 +213,9 @@ typedef uint8_t (*lorawan_battery_level_cb_t)(void);
  * @brief Defines the datarate changed callback handler function signature.
  *
  * @param dr Updated datarate.
+ * @param user_data Pointer to custom user data
  */
-typedef void (*lorawan_dr_changed_cb_t)(enum lorawan_datarate dr);
+typedef void (*lorawan_dr_changed_cb_t)(enum lorawan_datarate dr, void *user_data);
 
 /**
  * @brief Register a battery level callback function.
@@ -237,7 +244,7 @@ void lorawan_register_downlink_callback(struct lorawan_downlink_cb *cb);
  *
  * @param cb Pointer to datarate update callback
  */
-void lorawan_register_dr_changed_callback(lorawan_dr_changed_cb_t cb);
+void lorawan_register_dr_changed_callback(lorawan_dr_changed_cb_t cb, void *user_data);
 
 /**
  * @brief Join the LoRaWAN network
@@ -374,6 +381,8 @@ int lorawan_set_region(enum lorawan_region region);
 
 #ifdef CONFIG_LORAWAN_APP_CLOCK_SYNC
 
+typedef void (*lorawan_clock_sync_clbk)(void *user_data);
+
 /**
  * @brief Run Application Layer Clock Synchronization service
  *
@@ -384,9 +393,18 @@ int lorawan_set_region(enum lorawan_region region);
  * Clock synchronization is required for firmware upgrades over multicast
  * sessions, but can also be used independent of a FUOTA process.
  *
+ * @param clbk Callback to be called once the clock is synchronized
+ * @param user_data Data to be passed to the callback
  * @return 0 if successful, negative errno otherwise.
  */
-int lorawan_clock_sync_run(void);
+int lorawan_clock_sync_run(lorawan_clock_sync_clbk clbk, void *user_data);
+
+/**
+ * @brief Stop the Application Layer Clock Synchronization service
+ * 
+ * @return int same as k_work_cancel_delayable_sync
+ */
+int lorawan_clock_sync_stop(void);
 
 /**
  * @brief Retrieve the current synchronized time

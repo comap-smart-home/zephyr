@@ -87,6 +87,7 @@ static enum lorawan_channels_mask_size region_channels_mask_size =
 
 static lorawan_battery_level_cb_t battery_level_cb;
 static lorawan_dr_changed_cb_t dr_changed_cb;
+void *dr_change_user_data = NULL;
 
 /* implementation required by the soft-se (software secure element) */
 void BoardGetUniqueId(uint8_t *id)
@@ -118,8 +119,8 @@ static void datarate_observe(bool force_notification)
 	if ((mib_req.Param.ChannelsDatarate != current_datarate) ||
 	    (force_notification)) {
 		current_datarate = mib_req.Param.ChannelsDatarate;
-		if (dr_changed_cb != NULL) {
-			dr_changed_cb(current_datarate);
+		if (dr_changed_cb) {
+			dr_changed_cb(current_datarate, dr_change_user_data);
 		}
 		LOG_INF("Datarate changed: DR_%d", current_datarate);
 	}
@@ -172,7 +173,8 @@ static void mcps_indication_handler(McpsIndication_t *mcps_indication)
 			       mcps_indication->IsUplinkTxPending == 1,
 			       mcps_indication->Rssi, mcps_indication->Snr,
 			       mcps_indication->BufferSize,
-			       mcps_indication->Buffer);
+			       mcps_indication->Buffer,
+				   cb->user_data);
 		}
 	}
 
@@ -674,9 +676,10 @@ void lorawan_register_downlink_callback(struct lorawan_downlink_cb *cb)
 	sys_slist_append(&dl_callbacks, &cb->node);
 }
 
-void lorawan_register_dr_changed_callback(lorawan_dr_changed_cb_t cb)
+void lorawan_register_dr_changed_callback(lorawan_dr_changed_cb_t cb, void *user_data)
 {
 	dr_changed_cb = cb;
+	dr_change_user_data = user_data;
 }
 
 int lorawan_start(void)
