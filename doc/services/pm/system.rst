@@ -133,6 +133,19 @@ into certain power states. This can be used by devices when executing tasks in
 background to prevent the system from going to a specific state where it would
 lose context. See :c:func:`pm_policy_state_lock_get`.
 
+Some power states above S2RAM may also affect peripheral context; this can lead
+to a peripheral losing configuration when certain SoCs enters these specific
+low-power states.
+
+These exception states can be described in a peripheral's devicetree node with
+the ``reinit-power-states`` property:
+
+.. code-block:: devicetree
+
+   device-1 {
+      reinit-power-states = <&stop2>;
+   };
+
 Examples
 ========
 

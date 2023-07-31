@@ -184,6 +184,16 @@ struct pm_state_constraint {
 	uint8_t substate_id;
 };
 
+/**
+ * @brief PM state transition direction: state entry bit field value
+ */
+#define PM_STATE_ENTRY        BIT(0)
+
+/**
+ * @brief PM state transition direction: state exit bit field value
+ */
+#define PM_STATE_EXIT         BIT(1)
+
 /** @cond INTERNAL_HIDDEN */
 
 /**
@@ -211,6 +221,20 @@ struct pm_state_constraint {
 		    (PM_STATE_INFO_DT_INIT(DT_PHANDLE_BY_IDX(node_id, cpu_power_states, i)),), ())
 
 /**
+ * @brief Helper macro to initialize an entry of a struct pm_state_info array
+ * when using UTIL_LISTIFY in PM_STATE_INFO_LIST_FROM_DT_REINIT.
+ *
+ * @note Only enabled states are initialized.
+ *
+ * @param i UTIL_LISTIFY entry index.
+ * @param node_id A node identifier with compatible zephyr,power-state
+ */
+#define Z_PM_STATE_INFO_FROM_DT_REINIT(i, node_id)						  \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_PHANDLE_BY_IDX(node_id, reinit_power_states, i), okay), \
+		    (PM_STATE_INFO_DT_INIT(DT_PHANDLE_BY_IDX(node_id, reinit_power_states, i)),), \
+		    ())
+
+/**
  * @brief Helper macro to initialize an entry of a struct pm_state array when
  * using UTIL_LISTIFY in PM_STATE_LIST_FROM_DT_CPU.
  *
@@ -222,6 +246,18 @@ struct pm_state_constraint {
 #define Z_PM_STATE_FROM_DT_CPU(i, node_id)                                                        \
 	COND_CODE_1(DT_NODE_HAS_STATUS(DT_PHANDLE_BY_IDX(node_id, cpu_power_states, i), okay),    \
 		    (PM_STATE_DT_INIT(DT_PHANDLE_BY_IDX(node_id, cpu_power_states, i)),), ())
+
+/**
+ * @brief Call a function for an enabled power-state phandle list item
+ *
+ * @param node_id zephyr,power-state node identifier
+ * @param prop Property holding power-state phandle(s)
+ * @param idx Index within the phandle list
+ * @param fn Function taking a power-state node_id
+ */
+#define Z_PM_STATE_DT_PHANDLE_GEN(node_id, prop, idx, fn)					 \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_PHANDLE_BY_IDX(node_id, cpu_power_states, idx), okay), \
+		    (fn(DT_PHANDLE_BY_IDX(node_id, cpu_power_states, idx))), ())
 
 /** @endcond */
 
@@ -312,6 +348,60 @@ struct pm_state_constraint {
 	}
 
 /**
+ * @brief Initialize an array of struct pm_state_info with information from all
+ * the states present and enabled in the given device node identifier.
+ *
+ * Example devicetree fragment:
+ *
+ * @code{.dts}
+	soc {
+ *		...
+ *		cpu0: cpu@0 {
+ *			device_type = "cpu";
+ *			...
+ *			cpu-power-states = <&state0 &state1>;
+ *		};
+
+ *		i2c1: i2c@50000000 {
+ *			...
+ *			reinit-power-states = <&state1>;
+ *		};
+ *
+ *		power-states {
+ *			state0: state0 {
+ *				compatible = "zephyr,power-state";
+ *				power-state-name = "suspend-to-idle";
+ *				min-residency-us = <10000>;
+ *				exit-latency-us = <100>;
+ *			};
+ *
+ *			state1: state1 {
+ *				compatible = "zephyr,power-state";
+ *				power-state-name = "suspend-to-ram";
+ *				min-residency-us = <50000>;
+ *				exit-latency-us = <500>;
+ *			};
+ *		};
+ *	};
+
+ * @endcode
+ *
+ * Example usage:
+ *
+ * @code{.c}
+ * const struct pm_state_info states[] =
+ *	PM_STATE_INFO_LIST_FROM_DT_REINIT(DT_NODELABEL(i2c1));
+ * @endcode
+ *
+ * @param node_id A device node identifier.
+ */
+#define PM_STATE_INFO_LIST_FROM_DT_REINIT(node_id)				\
+	{									\
+		LISTIFY(DT_PROP_LEN_OR(node_id, reinit_power_states, 0),	\
+			Z_PM_STATE_INFO_FROM_DT_REINIT, (), node_id)		\
+	}
+
+/**
  * @brief Initialize an array of struct pm_state with information from all the
  * states present and enabled in the given CPU node identifier.
  *
@@ -369,6 +459,27 @@ struct pm_state_constraint {
  * @return Number of supported states.
  */
 uint8_t pm_state_cpu_get_all(uint8_t cpu, const struct pm_state_info **states);
+
+/**
+ * Retrieve the index of a CPU's DT cpu-power-states array element.
+ *
+ * @param cpu CPU index.
+ * @param state pm_state state.
+ * @param substate_id pm_state substate ID.
+ *
+ * @return Index of the PM state, or -1.
+ */
+int8_t pm_state_cpu_get_index(uint8_t cpu, enum pm_state state, uint8_t substate_id);
+
+/**
+ * Retrieve the index of a DT power-states array element.
+ *
+ * @param state pm_state state.
+ * @param substate_id pm_state substate ID.
+ *
+ * @return Index of the PM state, or -1.
+ */
+int8_t pm_state_get_index(enum pm_state state, uint8_t substate_id);
 
 /**
  * @}

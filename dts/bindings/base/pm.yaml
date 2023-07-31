@@ -35,3 +35,12 @@ properties:
     type: phandles
     description: |
       List of power states that will disable this device power.
+
+  reinit-power-states:
+    type: phandles
+    description: |
+      Specifies special power states where a peripheral requires
+      reinitialization due to configuration loss.
+
+      While states at or beyond S2RAM are naturally assumed to need
+      reinitialization, this property highlights the exceptions to that rule.
