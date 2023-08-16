@@ -337,10 +337,10 @@ static void multicast_package_callback(uint8_t port, bool data_pending, int16_t 
 
 	if (tx_pos > 0) {
 		/* Random delay 2+-1 seconds according to RP002-1.0.3, chapter 2.3 */
-		uint32_t delay = 1 + sys_rand32_get() % 3;
+		uint32_t delay = MSEC_PER_SEC + sys_rand32_get() % (3*MSEC_PER_SEC);
 
 		lorawan_services_schedule_uplink(LORAWAN_PORT_MULTICAST, tx_buf, tx_pos,
-						 delay * MSEC_PER_SEC);
+						 delay);
 	}
 }
 

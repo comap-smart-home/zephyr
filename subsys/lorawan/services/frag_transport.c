@@ -128,7 +128,7 @@ static void frag_transport_package_callback(uint8_t port, bool data_pending, int
 				tx_buf[tx_pos++] = ctx[index].decoder_status.MatrixError & 0x01;
 
 				ans_delay = sys_rand32_get() %
-					(1U << (ctx[index].block_ack_delay + 4));
+					((1U << (ctx[index].block_ack_delay + 4)) * MSEC_PER_SEC );
 
 				LOG_DBG("FragSessionStatusAns index %d, FragNbRx: %u, "
 					"FragNbLost: %u, MissingFrag: %u, status: %u, delay: %d",
@@ -277,7 +277,7 @@ static void frag_transport_package_callback(uint8_t port, bool data_pending, int
 
 	if (tx_pos > 0) {
 		lorawan_services_schedule_uplink(LORAWAN_PORT_FRAG_TRANSPORT, tx_buf, tx_pos,
-						 ans_delay * MSEC_PER_SEC);
+						 ans_delay);
 	}
 }
 
