@@ -354,6 +354,36 @@ int lorawan_clock_sync_get(uint32_t *gps_time);
 
 #endif /* CONFIG_LORAWAN_APP_CLOCK_SYNC */
 
+#ifdef CONFIG_LORAWAN_FRAG_TRANSPORT
+
+/**
+ * @brief Run Fragmented Data Block Transport service
+ *
+ * This service receives fragmented data (usually firmware images) and
+ * stores them in the image-1 flash partition.
+ *
+ * After all fragments have been received, the provided callback is invoked.
+ *
+ * @param transport_finished_cb Callback for notification of finished data transfer.
+ */
+int lorawan_frag_transport_run(void (*transport_finished_cb)(void));
+
+#endif /* CONFIG_LORAWAN_FRAG_TRANSPORT */
+
+#ifdef CONFIG_LORAWAN_REMOTE_MULTICAST
+
+/**
+ * @brief Run Remote Multicast Setup service
+ *
+ * This service is responsible for multicast session key exchange and setting
+ * up a class C session. The keys are stored in the non-volatile memory.
+ *
+ * @return 0 if successful, negative errno otherwise.
+ */
+int lorawan_remote_multicast_run(void);
+
+#endif /* CONFIG_LORAWAN_REMOTE_MULTICAST */
+
 #ifdef __cplusplus
 }
 #endif
