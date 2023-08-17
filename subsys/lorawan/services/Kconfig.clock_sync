@@ -1,0 +1,36 @@
+
+config LORAWAN_APP_CLOCK_SYNC
+	bool "Application Layer Clock Synchronization"
+	help
+	  Enables the LoRaWAN Application Layer Clock Synchronization service
+	  according to LoRa Alliance TS003-2.0.0.
+
+	  The service uses the default port 202.
+
+if LORAWAN_APP_CLOCK_SYNC
+
+config LORAWAN_APP_CLOCK_SYNC_PERIODICITY
+	int "Application Layer Clock Synchronization periodicity"
+	range 128 4194304
+	default 86400
+	help
+	  Initial setting for clock synchronization periodicity in seconds.
+
+	  The value can be updated remotely by the application server within a
+	  range from 128 (0x80) to 4194304 (0x400000).
+
+	  Default setting: 24h.
+
+config LORAWAN_APP_CLOCK_NOT_SYNC_PERIODICITY
+	int "Application Layer Clock Synchronization not synchronized periodicity"
+	range 128 4194304
+	default 128
+	help
+	  Initial setting for clock synchronization periodicity in seconds.
+
+	  The value can be updated remotely by the application server within a
+	  range from 128 (0x80) to 4194304 (0x400000).
+
+	  Default setting: 2min.
+
+endif # LORAWAN_APP_CLOCK_SYNC

@@ -9,7 +9,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "frag_flash.h"
 #include "lorawan_services.h"
 
 #include <LoRaMac.h>
@@ -24,17 +23,17 @@ LOG_MODULE_REGISTER(lorawan_frag_transport, CONFIG_LORAWAN_SERVICES_LOG_LEVEL);
 #define MAX_FRAG_TRANSPORT_ANS_LEN 5
 
 enum frag_transport_commands {
-	FRAG_TRANSPORT_CMD_PKG_VERSION         = 0x00,
-	FRAG_TRANSPORT_CMD_FRAG_STATUS         = 0x01,
-	FRAG_TRANSPORT_CMD_FRAG_SESSION_SETUP  = 0x02,
+	FRAG_TRANSPORT_CMD_PKG_VERSION = 0x00,
+	FRAG_TRANSPORT_CMD_FRAG_STATUS = 0x01,
+	FRAG_TRANSPORT_CMD_FRAG_SESSION_SETUP = 0x02,
 	FRAG_TRANSPORT_CMD_FRAG_SESSION_DELETE = 0x03,
 #if CONFIG_LORAWAN_FRAG_TRANSPORT_VERSION >= 2
-	FRAG_TRANSPORT_CMD_BLOCK_RECEIVED      = 0x04,
+	FRAG_TRANSPORT_CMD_BLOCK_RECEIVED = 0x04,
 #endif /* CONFIG_LORAWAN_FRAG_TRANSPORT_VERSION */
-	FRAG_TRANSPORT_CMD_DATA_FRAGMENT       = 0x08,
+	FRAG_TRANSPORT_CMD_DATA_FRAGMENT = 0x08,
 };
 
-struct frag_transport_context {
+struct frag_group_data {
 	/** Stores if this session is active */
 	bool is_active;
 	union {
@@ -59,7 +58,7 @@ struct frag_transport_context {
 			uint8_t frag_algo: 3;
 #if CONFIG_LORAWAN_FRAG_TRANSPORT_VERSION >= 2
 			/** Specifies if full block reception should be ACKed */
-			uint8_t ack_reception : 1;
+			uint8_t ack_reception: 1;
 #endif /* CONFIG_LORAWAN_FRAG_TRANSPORT_VERSION */
 		};
 	};
@@ -67,17 +66,19 @@ struct frag_transport_context {
 	uint8_t padding;
 	/** Application-specific descriptor for the data block, e.g. firmware version */
 	uint32_t descriptor;
-
-	/* variables required for FragDecoder.h */
-	FragDecoderStatus_t decoder_status;
-	FragDecoderCallbacks_t decoder_callbacks;
-	int32_t decoder_process_status;
 };
 
-static struct frag_transport_context ctx[LORAMAC_MAX_MC_CTX];
+struct frag_session_data {
+	struct frag_group_data group_data;
+	FragDecoderStatus_t decoder_status;
+	int32_t decoder_process_status;
+	FragDecoderCallbacks_t decoder_callbacks;
+	void (*on_completion)(int status);
+};
 
-/* Callback for notification of finished firmware transfer */
-static void (*finished_cb)(void);
+lorawan_frag_transport_open frag_transport_open_callback;
+
+static struct frag_session_data ctx[LORAMAC_MAX_MC_CTX];
 
 static void frag_transport_package_callback(uint8_t port, bool data_pending, int16_t rssi,
 					    int8_t snr, uint8_t len, const uint8_t *rx_buf)
@@ -110,25 +111,29 @@ static void frag_transport_package_callback(uint8_t port, bool data_pending, int
 			uint8_t participants = frag_status & 0x01;
 			uint8_t index = frag_status >> 1;
 
-			LOG_DBG("FragSessionStatusReq index %d, participants: %u",
-				index, participants);
+			LOG_DBG("FragSessionStatusReq index %d, participants: %u", index,
+				participants);
 
 			ctx[index].decoder_status = FragDecoderGetStatus();
 
 			if (participants == 1 || ctx[index].decoder_status.FragNbLost > 0) {
 
-				uint8_t missing_frag = CLAMP(ctx[index].nb_frag -
-					ctx[index].decoder_status.FragNbRx, 0, 255);
+				uint8_t missing_frag =
+					CLAMP(ctx[index].group_data.nb_frag -
+						      ctx[index].decoder_status.FragNbRx,
+					      0, 255);
 
 				tx_buf[tx_pos++] = FRAG_TRANSPORT_CMD_FRAG_STATUS;
 				tx_buf[tx_pos++] = ctx[index].decoder_status.FragNbRx & 0xFF;
-				tx_buf[tx_pos++] = (index << 6) |
+				tx_buf[tx_pos++] =
+					(index << 6) |
 					((ctx[index].decoder_status.FragNbRx >> 8) & 0x3F);
 				tx_buf[tx_pos++] = missing_frag;
 				tx_buf[tx_pos++] = ctx[index].decoder_status.MatrixError & 0x01;
 
 				ans_delay = sys_rand32_get() %
-					((1U << (ctx[index].block_ack_delay + 4)) * MSEC_PER_SEC );
+					    ((1U << (ctx[index].group_data.block_ack_delay + 4)) *
+					     MSEC_PER_SEC);
 
 				LOG_DBG("FragSessionStatusAns index %d, FragNbRx: %u, "
 					"FragNbLost: %u, MissingFrag: %u, status: %u, delay: %d",
@@ -145,49 +150,55 @@ static void frag_transport_package_callback(uint8_t port, bool data_pending, int
 			uint8_t index = frag_session >> 4;
 			uint8_t status = index << 6;
 
-			ctx[index].frag_session = frag_session;
+			ctx[index].group_data.frag_session = frag_session;
 
-			ctx[index].nb_frag = rx_buf[rx_pos++];
-			ctx[index].nb_frag |= rx_buf[rx_pos++] << 8;
+			ctx[index].group_data.nb_frag = rx_buf[rx_pos++];
+			ctx[index].group_data.nb_frag |= rx_buf[rx_pos++] << 8;
 
-			ctx[index].frag_size = rx_buf[rx_pos++];
-			ctx[index].control = rx_buf[rx_pos++];
-			ctx[index].padding = rx_buf[rx_pos++];
+			ctx[index].group_data.frag_size = rx_buf[rx_pos++];
+			ctx[index].group_data.control = rx_buf[rx_pos++];
+			ctx[index].group_data.padding = rx_buf[rx_pos++];
 
-			ctx[index].descriptor = rx_buf[rx_pos++];
-			ctx[index].descriptor += rx_buf[rx_pos++] << 8;
-			ctx[index].descriptor += rx_buf[rx_pos++] << 16;
-			ctx[index].descriptor += rx_buf[rx_pos++] << 24;
+			ctx[index].group_data.descriptor = rx_buf[rx_pos++];
+			ctx[index].group_data.descriptor += rx_buf[rx_pos++] << 8;
+			ctx[index].group_data.descriptor += rx_buf[rx_pos++] << 16;
+			ctx[index].group_data.descriptor += rx_buf[rx_pos++] << 24;
 
 			LOG_DBG("FragSessionSetupReq index %d, nb_frag: %u, frag_size: %u, "
-				"padding: %u, control: 0x%x, descriptor: 0x%.8x", index,
-				ctx[index].nb_frag, ctx[index].frag_size, ctx[index].padding,
-				ctx[index].control, ctx[index].descriptor);
+				"padding: %u, control: 0x%x, descriptor: 0x%.8x",
+				index, ctx[index].group_data.nb_frag,
+				ctx[index].group_data.frag_size, ctx[index].group_data.padding,
+				ctx[index].group_data.control, ctx[index].group_data.descriptor);
 
 			/* ToDo: Add new Spec v2 features
 			 * - SessionCnt to prevent replay attacks
 			 * - MIC for integrity check and authentication
 			 */
 
-			if (ctx[index].frag_algo > 0) {
+			if (ctx[index].group_data.frag_algo > 0) {
 				/* FragAlgo unsupported */
 				status |= 1U << 0;
 			}
 
-			if (ctx[index].nb_frag > FRAG_MAX_NB ||
-					ctx[index].frag_size > FRAG_MAX_SIZE ||
-					ctx[index].nb_frag * ctx[index].frag_size >
-					FragDecoderGetMaxFileSize()) {
+			if (ctx[index].group_data.nb_frag > FRAG_MAX_NB ||
+			    ctx[index].group_data.frag_size > FRAG_MAX_SIZE ||
+			    ctx[index].group_data.nb_frag * ctx[index].group_data.frag_size >
+				    FragDecoderGetMaxFileSize()) {
 				/* Not enough memory */
 				status |= 1U << 1;
 			}
 
-			if (ctx[index].frag_index >= ARRAY_SIZE(ctx)) {
+			if (ctx[index].group_data.frag_index >= ARRAY_SIZE(ctx)) {
 				/* FragIndex unsupported */
 				status |= 1U << 2;
 			}
 
-			/* Descriptor not used: Ignore Wrong Descriptor error */
+			struct frag_transport_parameters params;
+			if (frag_transport_open_callback(ctx[index].group_data.descriptor,
+							 &params)) {
+				/* WrongDescriptor */
+				status |= 1U << 3;
+			}
 
 			if ((status & 0x1F) == 0) {
 				/*
@@ -198,14 +209,14 @@ static void frag_transport_package_callback(uint8_t port, bool data_pending, int
 				ctx[index].decoder_callbacks.FragDecoderWrite = NULL;
 				ctx[index].decoder_callbacks.FragDecoderRead = NULL;
 
-				FragDecoderInit(ctx[index].nb_frag, ctx[index].frag_size,
+				FragDecoderInit(ctx[index].group_data.nb_frag,
+						ctx[index].group_data.frag_size,
 						&ctx[index].decoder_callbacks);
 
-				ctx[index].decoder_callbacks.FragDecoderWrite = frag_flash_write;
-				ctx[index].decoder_callbacks.FragDecoderRead = frag_flash_read;
-				ctx[index].is_active = true;
-
-				frag_flash_init();
+				ctx[index].decoder_callbacks.FragDecoderWrite = params.write;
+				ctx[index].decoder_callbacks.FragDecoderRead = params.read;
+				ctx[index].on_completion = params.on_completion;
+				ctx[index].group_data.is_active = true;
 				ctx[index].decoder_process_status = FRAG_SESSION_ONGOING;
 			}
 
@@ -220,11 +231,11 @@ static void frag_transport_package_callback(uint8_t port, bool data_pending, int
 			uint8_t status = 0x00;
 
 			status |= index;
-			if (index >= ARRAY_SIZE(ctx) || !ctx[index].is_active) {
+			if (index >= ARRAY_SIZE(ctx) || !ctx[index].group_data.is_active) {
 				/* Session does not exist */
 				status |= 1U << 3;
 			} else {
-				ctx[index].is_active = false;
+				ctx[index].group_data.is_active = false;
 			}
 
 			tx_buf[tx_pos++] = FRAG_TRANSPORT_CMD_FRAG_SESSION_DELETE;
@@ -245,13 +256,12 @@ static void frag_transport_package_callback(uint8_t port, bool data_pending, int
 			uint16_t frag_counter = frag_index_n & 0x3FFF;
 			uint8_t index = (frag_index_n >> 14) & 0x03;
 
-			LOG_DBG("DataFragment %u of %u (session index: %u)",
-				frag_counter, ctx[index].nb_frag, index);
+			LOG_DBG("DataFragment %u of %u (session index: %u)", frag_counter,
+				ctx[index].group_data.nb_frag, index);
 
 			if (ctx[index].decoder_process_status == FRAG_SESSION_ONGOING) {
-				ctx[index].decoder_process_status =
-					FragDecoderProcess(frag_counter,
-							   (uint8_t *)&rx_buf[rx_pos]);
+				ctx[index].decoder_process_status = FragDecoderProcess(
+					frag_counter, (uint8_t *)&rx_buf[rx_pos]);
 				ctx[index].decoder_status = FragDecoderGetStatus();
 
 				LOG_DBG("FragDecoder process status: %d",
@@ -260,14 +270,13 @@ static void frag_transport_package_callback(uint8_t port, bool data_pending, int
 				/* Positive status corresponds to number of lost (but recovered)
 				 * fragments. Value >= 0 means the upgrade is done.
 				 */
-				frag_flash_finish();
 
-				if (finished_cb != NULL) {
-					finished_cb();
+				if (ctx[index].on_completion != NULL) {
+					ctx[index].on_completion(ctx[index].decoder_process_status);
 				}
 			}
 
-			rx_pos += ctx[index].frag_size;
+			rx_pos += ctx[index].group_data.frag_size;
 			break;
 		}
 		default:
@@ -281,14 +290,12 @@ static void frag_transport_package_callback(uint8_t port, bool data_pending, int
 	}
 }
 
-static struct lorawan_downlink_cb downlink_cb = {
-	.port = (uint8_t)LORAWAN_PORT_FRAG_TRANSPORT,
-	.cb = frag_transport_package_callback
-};
+static struct lorawan_downlink_cb downlink_cb = {.port = (uint8_t)LORAWAN_PORT_FRAG_TRANSPORT,
+						 .cb = frag_transport_package_callback};
 
-int lorawan_frag_transport_run(void (*transport_finished_cb)(void))
+int lorawan_frag_transport_run(lorawan_frag_transport_open open_callback)
 {
-	finished_cb = transport_finished_cb;
+	frag_transport_open_callback = open_callback;
 
 	/* initialize non-zero static variables */
 	for (int i = 0; i < ARRAY_SIZE(ctx); i++) {

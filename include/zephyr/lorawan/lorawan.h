@@ -356,17 +356,20 @@ int lorawan_clock_sync_get(uint32_t *gps_time);
 
 #ifdef CONFIG_LORAWAN_FRAG_TRANSPORT
 
+struct frag_transport_parameters {
+	int8_t ( *write )( uint32_t addr, uint8_t *data, uint32_t size );
+	int8_t ( *read )( uint32_t addr, uint8_t *data, uint32_t size );
+	void ( *on_completion )(int status);
+};
+
+typedef int (*lorawan_frag_transport_open)(int descriptor, struct frag_transport_parameters *params);
+
 /**
  * @brief Run Fragmented Data Block Transport service
  *
- * This service receives fragmented data (usually firmware images) and
- * stores them in the image-1 flash partition.
- *
- * After all fragments have been received, the provided callback is invoked.
- *
- * @param transport_finished_cb Callback for notification of finished data transfer.
+ * @param open_callback Callback used when a frag transport is starting with a given descriptor
  */
-int lorawan_frag_transport_run(void (*transport_finished_cb)(void));
+int lorawan_frag_transport_run(lorawan_frag_transport_open open_callback);
 
 #endif /* CONFIG_LORAWAN_FRAG_TRANSPORT */
 

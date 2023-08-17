@@ -15,20 +15,29 @@
 LOG_MODULE_REGISTER(lorawan_fuota_sample, CONFIG_LORAWAN_SERVICES_LOG_LEVEL);
 
 /* Customize based on device configuration */
-#define LORAWAN_DEV_EUI		{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
-#define LORAWAN_JOIN_EUI	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
-#define LORAWAN_APP_KEY		{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,\
-				  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+#define LORAWAN_DEV_EUI                                                                            \
+	{                                                                                          \
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00                                     \
+	}
+#define LORAWAN_JOIN_EUI                                                                           \
+	{                                                                                          \
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00                                     \
+	}
+#define LORAWAN_APP_KEY                                                                            \
+	{                                                                                          \
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,      \
+			0x00, 0x00, 0x00                                                           \
+	}
 
 #define DELAY K_SECONDS(120)
 
 char data[] = {'h', 'e', 'l', 'l', 'o', 'w', 'o', 'r', 'l', 'd'};
 
-static void downlink_info(uint8_t port, bool data_pending, int16_t rssi, int8_t snr,
-			  uint8_t len, const uint8_t *data)
+static void downlink_info(uint8_t port, bool data_pending, int16_t rssi, int8_t snr, uint8_t len,
+			  const uint8_t *data)
 {
-	LOG_INF("Received from port %d, pending %d, RSSI %ddB, SNR %ddBm",
-		port, data_pending, rssi, snr);
+	LOG_INF("Received from port %d, pending %d, RSSI %ddB, SNR %ddBm", port, data_pending, rssi,
+		snr);
 	if (data) {
 		LOG_HEXDUMP_INF(data, len, "Payload: ");
 	}
@@ -42,14 +51,33 @@ static void datarate_changed(enum lorawan_datarate dr)
 	LOG_INF("New Datarate: DR %d, Max Payload %d", dr, max_size);
 }
 
-static void fuota_finished(void)
-{
-	LOG_INF("FUOTA finished. Reset device to apply firmware upgrade.");
 
-	/*
-	 * In an actual application the firmware should be rebooted here if
-	 * no important tasks are pending
-	 */
+int8_t frag_transport_write(uint32_t addr, uint8_t *data, uint32_t size)
+{
+	// Stream flash write
+	return 0;
+}
+
+int8_t frag_transport_read(uint32_t addr, uint8_t *data, uint32_t size)
+{
+	// Stream flash read
+	return 0;
+}
+
+void frag_transport_on_completion(int status)
+{
+	LOG_INF("FUOTA finished with status %d. Reset device to apply firmware upgrade.", status);
+}
+
+int frag_transport_open(int descriptor, struct frag_transport_parameters *params)
+{
+	LOG_INF("Start frag transport with descriptor %d", descriptor);
+	params->on_completion = frag_transport_on_completion;
+	params->read = frag_transport_write;
+	params->write = frag_transport_read;
+
+	// Stream flash init
+	return 0;
 }
 
 int main(void)
@@ -61,10 +89,7 @@ int main(void)
 	uint8_t app_key[] = LORAWAN_APP_KEY;
 	int ret;
 
-	struct lorawan_downlink_cb downlink_cb = {
-		.port = LW_RECV_PORT_ANY,
-		.cb = downlink_info
-	};
+	struct lorawan_downlink_cb downlink_cb = {.port = LW_RECV_PORT_ANY, .cb = downlink_info};
 
 	lora_dev = DEVICE_DT_GET(DT_ALIAS(lora0));
 	if (!device_is_ready(lora_dev)) {
@@ -112,15 +137,14 @@ int main(void)
 	 * It could also be used in a class A session, but would take very long
 	 * in that case.
 	 */
-	lorawan_frag_transport_run(fuota_finished);
+	lorawan_frag_transport_run(frag_transport_open);
 
 	/*
 	 * As the other services run in the background, we can now run our
 	 * normal LoRaWAN application code.
 	 */
 	while (1) {
-		ret = lorawan_send(2, data, sizeof(data),
-				   LORAWAN_MSG_UNCONFIRMED);
+		ret = lorawan_send(2, data, sizeof(data), LORAWAN_MSG_UNCONFIRMED);
 
 		/*
 		 * Note: The stack may return -EAGAIN if the provided data
