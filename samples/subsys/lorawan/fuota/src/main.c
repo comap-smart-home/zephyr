@@ -11,6 +11,7 @@
 #include <zephyr/device.h>
 #include <zephyr/lorawan/lorawan.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/storage/flash_map.h>
 
 LOG_MODULE_REGISTER(lorawan_fuota_sample, CONFIG_LORAWAN_SERVICES_LOG_LEVEL);
 
@@ -30,6 +31,10 @@ LOG_MODULE_REGISTER(lorawan_fuota_sample, CONFIG_LORAWAN_SERVICES_LOG_LEVEL);
 	}
 
 #define DELAY K_SECONDS(120)
+
+#define SLOT_PATCH_ID	 FIXED_PARTITION_ID(patch_partition)
+
+const struct flash_area *slot_patch_fa;
 
 char data[] = {'h', 'e', 'l', 'l', 'o', 'w', 'o', 'r', 'l', 'd'};
 
@@ -54,29 +59,39 @@ static void datarate_changed(enum lorawan_datarate dr)
 
 int8_t frag_transport_write(uint32_t addr, uint8_t *data, uint32_t size)
 {
-	// Stream flash write
-	return 0;
+	return flash_area_write(slot_patch_fa, addr, data, size);
 }
 
 int8_t frag_transport_read(uint32_t addr, uint8_t *data, uint32_t size)
 {
-	// Stream flash read
-	return 0;
+	return flash_area_read(slot_patch_fa, addr, data, size);
 }
 
 void frag_transport_on_completion(int status)
 {
 	LOG_INF("FUOTA finished with status %d. Reset device to apply firmware upgrade.", status);
+	flash_area_close(slot_patch_fa);
 }
 
 int frag_transport_open(int descriptor, struct frag_transport_parameters *params)
 {
 	LOG_INF("Start frag transport with descriptor %d", descriptor);
+
+	if (descriptor != 0) {
+		// We arbitrary chose 0 as the descriptor used for the firmware image
+		return -1;
+	}
+
 	params->on_completion = frag_transport_on_completion;
 	params->read = frag_transport_write;
 	params->write = frag_transport_read;
 
 	// Stream flash init
+
+	if (flash_area_open(SLOT_PATCH_ID, &slot_patch_fa)) {
+		LOG_ERR("Cant open flash partition");
+		return -2;
+	}
 	return 0;
 }
 
