@@ -36,6 +36,7 @@ if(${CONFIG_HAS_SEMTECH_LORAMAC})
 endif()
 
 zephyr_library_compile_definitions_ifdef(CONFIG_HAS_SEMTECH_SOFT_SE SOFT_SE)
+zephyr_library_compile_definitions_ifdef(CONFIG_LORAWAN_HAS_CLASS_B LORAMAC_CLASSB_ENABLED)
 
 zephyr_library_sources_ifdef(CONFIG_HAS_SEMTECH_SOFT_SE
   ${ZEPHYR_LORAMAC_NODE_MODULE_DIR}/src/peripherals/soft-se/aes.c

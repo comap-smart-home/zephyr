@@ -27,6 +27,10 @@ config LORAWAN_SYSTEM_MAX_RX_ERROR
 	  System Max Rx timing error value in ms to be used by LoRaWAN stack
 	  for calculating the RX1/RX2 window timing.
 
+config LORAWAN_HAS_CLASS_B
+	bool "Enable lorawan class B"
+	default n
+
 config LORAMAC_REGION_AS923
 	bool "Asia 923MHz Frequency band"
 

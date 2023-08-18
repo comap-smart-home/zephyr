@@ -451,8 +451,13 @@ int lorawan_set_class(enum lorawan_class dev_class)
 		mib_req.Param.Class = CLASS_A;
 		break;
 	case LORAWAN_CLASS_B:
-		LOG_ERR("Class B not supported yet!");
+#if CONFIG_LORAWAN_HAS_CLASS_B
+		mib_req.Param.Class = CLASS_B;
+		break;
+#else
+		LOG_ERR("Class B not activated!");
 		return -ENOTSUP;
+#endif
 	case LORAWAN_CLASS_C:
 		mib_req.Param.Class = CLASS_C;
 		break;
@@ -684,6 +689,15 @@ int lorawan_start(void)
 
 	return 0;
 }
+
+#if CONFIG_LORAWAN_HAS_CLASS_B
+
+TimerTime_t RtcTempCompensation( TimerTime_t period, float temperature )
+{
+    return period;
+}
+
+#endif
 
 static int lorawan_init(void)
 {
