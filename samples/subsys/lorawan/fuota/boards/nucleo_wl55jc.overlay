@@ -24,23 +24,19 @@
 
 		test_fw_partition: partition@0 {
 			label = "image";
-			reg = <0x0 0x20000>;
+			reg = <0x0 0x30000>;
 		};
-		slot0_partition: partition@20000 {
-			label = "image-0";
-			reg = <0x20000 0x1000>;
-		};
-		slot1_partition: partition@21000 {
+		slot0_partition: partition@30000 {
 			label = "image-1";
-			reg = <0x21000 0x1000>;
+			reg = <0x30000 0x1000>;
 		};
-		patch_partition: partition@22000 {
+		slot1_partition: partition@31000 {
 			label = "patch";
-			reg = <0x22000 0x1000>;
+			reg = <0x31000 0x1000>;
 		};
-		slot1_verif_partition: partition@23000 {
+		patch_partition: partition@32000 {
 			label = "image-1-verif";
-			reg = <0x23000 0x1000>;
+			reg = <0x32000 0x1000>;
 		};
 	};
 };
