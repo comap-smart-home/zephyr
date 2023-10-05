@@ -163,8 +163,6 @@ int pm_device_runtime_get(const struct device *dev)
 			ret = -EAGAIN;
 			goto unlock;
 		}
-		/* Power domain successfully claimed */
-		atomic_set_bit(&pm->flags, PM_DEVICE_FLAG_PD_CLAIMED);
 	}
 
 	pm->usage++;
@@ -213,13 +211,20 @@ int pm_device_runtime_put(const struct device *dev)
 	}
 
 	SYS_PORT_TRACING_FUNC_ENTER(pm, device_runtime_put, dev);
+
+	/*
+	 * Early return if device runtime is not enabled.
+	 */
+	if (!atomic_test_bit(&dev->pm->flags, PM_DEVICE_FLAG_RUNTIME_ENABLED)) {
+		return 0;
+	}
+
 	ret = runtime_suspend(dev, false);
 
 	/*
 	 * Now put the domain
 	 */
-	if ((ret == 0) &&
-	    atomic_test_and_clear_bit(&dev->pm->flags, PM_DEVICE_FLAG_PD_CLAIMED)) {
+	if ((ret == 0) && PM_DOMAIN(dev->pm)) {
 		ret = pm_device_runtime_put(PM_DOMAIN(dev->pm));
 	}
 	SYS_PORT_TRACING_FUNC_EXIT(pm, device_runtime_put, dev, ret);

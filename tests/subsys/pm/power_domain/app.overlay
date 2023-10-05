@@ -32,4 +32,15 @@
 		status = "okay";
 		power-domain = <&test_domain_balanced>;
 	};
+
+	test_domain_multiple_call: test_domain_multiple_call {
+		compatible = "power-domain";
+		status = "okay";
+	};
+
+	test_dev_multiple_call: test_dev_multiple_call {
+		compatible = "test-device-pm";
+		status = "okay";
+		power-domain = <&test_domain_multiple_call>;
+	};
 };
