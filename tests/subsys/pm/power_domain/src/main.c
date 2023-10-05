@@ -279,5 +279,68 @@ ZTEST(power_domain_1cpu, test_power_domain_device_balanced)
 	zassert_equal(state, PM_DEVICE_STATE_ACTIVE);
 }
 
+#define TEST_DOMAIN_MULTIPLE_CALL DT_NODELABEL(test_domain_multiple_call)
+#define TEST_DEV_MULTIPLE_CALL DT_NODELABEL(test_dev_multiple_call)
+
+PM_DEVICE_DT_DEFINE(TEST_DOMAIN_MULTIPLE_CALL, domain_pm_action);
+DEVICE_DT_DEFINE(TEST_DOMAIN_MULTIPLE_CALL, NULL, PM_DEVICE_DT_GET(TEST_DOMAIN_MULTIPLE_CALL),
+		 NULL, NULL, POST_KERNEL, 10, NULL);
+
+PM_DEVICE_DT_DEFINE(TEST_DEV_MULTIPLE_CALL, deva_pm_action);
+DEVICE_DT_DEFINE(TEST_DEV_MULTIPLE_CALL, NULL, PM_DEVICE_DT_GET(TEST_DEV_MULTIPLE_CALL),
+		 NULL, NULL, POST_KERNEL, 20, NULL);
+
+/**
+ * @brief Test power domain multiple consecutive call to PM device runtime
+ *
+ * Scenarios tested:
+ *
+ * - get - get + put + put device with a PD while PM is enabled
+ */
+ZTEST(power_domain_1cpu, test_power_domain_multiple_consecutive_call_to_pm_device_runtime)
+{
+	const struct device *domain = DEVICE_DT_GET(TEST_DOMAIN_MULTIPLE_CALL);
+	const struct device *dev = DEVICE_DT_GET(TEST_DEV_MULTIPLE_CALL);
+	enum pm_device_state state;
+	int ret;
+
+	/* Init domain */
+	pm_device_init_suspended(domain);
+	pm_device_runtime_enable(domain);
+
+	/* Init device */
+	pm_device_init_suspended(dev);
+	pm_device_runtime_enable(dev);
+
+	/* At this point domain should be SUSPENDED */
+	pm_device_state_get(domain, &state);
+	zassert_equal(state, PM_DEVICE_STATE_SUSPENDED);
+
+	/* At this point device should be SUSPENDED */
+	pm_device_state_get(dev, &state);
+	zassert_equal(state, PM_DEVICE_STATE_SUSPENDED);
+
+	/* Get and put the device without PM enabled should not change the domain */
+	ret = pm_device_runtime_get(dev);
+	zassert_equal(ret, 0);
+	pm_device_state_get(domain, &state);
+	zassert_equal(state, PM_DEVICE_STATE_ACTIVE);
+
+	ret = pm_device_runtime_get(dev);
+	zassert_equal(ret, 0);
+	pm_device_state_get(domain, &state);
+	zassert_equal(state, PM_DEVICE_STATE_ACTIVE);
+
+	ret = pm_device_runtime_put(dev);
+	zassert_equal(ret, 0);
+	pm_device_state_get(domain, &state);
+	zassert_equal(state, PM_DEVICE_STATE_ACTIVE);
+
+	ret = pm_device_runtime_put(dev);
+	zassert_equal(ret, 0);
+	pm_device_state_get(domain, &state);
+	zassert_equal(state, PM_DEVICE_STATE_SUSPENDED);
+}
+
 ZTEST_SUITE(power_domain_1cpu, NULL, NULL, ztest_simple_1cpu_before,
 			ztest_simple_1cpu_after, NULL);
