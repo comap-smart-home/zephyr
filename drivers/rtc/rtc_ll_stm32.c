@@ -259,6 +259,15 @@ static int rtc_stm32_get_time(const struct device *dev, struct rtc_time *timeptr
 		return err;
 	}
 
+	if (!LL_RTC_IsActiveFlag_INITS(RTC)) {
+		/* INITS flag is set when the calendar has been initialiazed. This flags is
+		 * reset only on backup domain reset, so it can be read after a system
+		 * reset to check if the calendar has been initialized.
+		 */
+		err = -ENODATA;
+		goto unlock;
+	}
+
 	do {
 		/* read date, time and subseconds and relaunch if a day increment occurred
 		 * while doing so as it will result in an erroneous result otherwise
@@ -275,7 +284,12 @@ static int rtc_stm32_get_time(const struct device *dev, struct rtc_time *timeptr
 		} while (rtc_time != LL_RTC_TIME_Get(RTC));
 	} while (rtc_date != LL_RTC_DATE_Get(RTC));
 
+unlock:
 	k_mutex_unlock(&data->lock);
+
+	if (err) {
+		return err;
+	}
 
 	timeptr->tm_year = bcd2bin(__LL_RTC_GET_YEAR(rtc_date)) + RTC_YEAR_REF - TM_YEAR_REF;
 	/* tm_mon allowed values are 0-11 */
