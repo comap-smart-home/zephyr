@@ -19,6 +19,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys_clock.h>
 #include <zephyr/pm/device.h>
+#include <zephyr/pm/device_runtime.h>
 
 #include "spi_nor.h"
 #include "jesd216.h"
@@ -740,6 +741,10 @@ static int mxicy_configure(const struct device *dev, const uint8_t *jedec_id)
 			return 0;
 		}
 
+		if (pm_device_runtime_get(dev)) {
+			return -ENODEV;
+		}
+
 		acquire_device(dev);
 
 		/* Read current configuration register */
@@ -765,7 +770,9 @@ static int mxicy_configure(const struct device *dev, const uint8_t *jedec_id)
 		}
 
 		release_device(dev);
+		(void) pm_device_runtime_put(dev);
 	}
+
 
 	return ret;
 }
@@ -783,11 +790,18 @@ static int spi_nor_read(const struct device *dev, off_t addr, void *dest,
 		return -EINVAL;
 	}
 
+	if (pm_device_runtime_get(dev)) {
+		return -ENODEV;
+	}
+
 	acquire_device(dev);
 
 	ret = spi_nor_cmd_addr_read(dev, SPI_NOR_CMD_READ, addr, dest, size);
 
 	release_device(dev);
+
+	(void) pm_device_runtime_put(dev);
+
 	return ret;
 }
 
@@ -832,6 +846,10 @@ static int spi_nor_write(const struct device *dev, off_t addr,
 		return -EINVAL;
 	}
 
+	if (pm_device_runtime_get(dev)) {
+		return -ENODEV;
+	}
+
 	acquire_device(dev);
 	ret = spi_nor_write_protection_set(dev, false);
 	if (ret == 0) {
@@ -874,6 +892,7 @@ static int spi_nor_write(const struct device *dev, off_t addr,
 	}
 
 	release_device(dev);
+	(void)pm_device_runtime_put(dev);
 	return ret;
 }
 
@@ -895,6 +914,10 @@ static int spi_nor_erase(const struct device *dev, off_t addr, size_t size)
 	/* size must be a multiple of sectors */
 	if ((size % SPI_NOR_SECTOR_SIZE) != 0) {
 		return -EINVAL;
+	}
+
+	if (pm_device_runtime_get(dev)) {
+		return -ENODEV;
 	}
 
 	acquire_device(dev);
@@ -951,6 +974,7 @@ static int spi_nor_erase(const struct device *dev, off_t addr, size_t size)
 	}
 
 	release_device(dev);
+	(void)pm_device_runtime_put(dev);
 
 	return ret;
 }
@@ -993,11 +1017,15 @@ static int spi_nor_write_protection_set(const struct device *dev,
 static int spi_nor_sfdp_read(const struct device *dev, off_t addr,
 			     void *dest, size_t size)
 {
+    if (pm_device_runtime_get(dev)) {
+		return -ENODEV;
+	}
 	acquire_device(dev);
 
 	int ret = read_sfdp(dev, addr, dest, size);
 
 	release_device(dev);
+	(void)pm_device_runtime_put(dev);
 
 	return ret;
 }
@@ -1011,11 +1039,16 @@ static int spi_nor_read_jedec_id(const struct device *dev,
 		return -EINVAL;
 	}
 
+	if (pm_device_runtime_get(dev)) {
+		return -ENODEV;
+	}
+    
 	acquire_device(dev);
 
 	int ret = spi_nor_cmd_read(dev, SPI_NOR_CMD_RDID, id, SPI_NOR_MAX_ID_LEN);
 
 	release_device(dev);
+	(void)pm_device_runtime_put(dev);
 
 	return ret;
 }
@@ -1060,6 +1093,10 @@ static int spi_nor_set_address_mode(const struct device *dev,
 		return -ENOTSUP;
 	}
 
+	if (pm_device_runtime_get(dev)) {
+		return -ENODEV;
+	}
+
 	acquire_device(dev);
 
 	if ((enter_4byte_addr & 0x02) != 0) {
@@ -1078,6 +1115,7 @@ static int spi_nor_set_address_mode(const struct device *dev,
 	}
 
 	release_device(dev);
+	(void)pm_device_runtime_put(dev);
 
 	return ret;
 }
@@ -1314,6 +1352,10 @@ static int spi_nor_configure(const struct device *dev)
 	}
 #endif
 
+	if (pm_device_runtime_get(dev)) {
+		return -ENODEV;
+	}
+
 	/* After a soft-reset the flash might be in DPD or busy writing/erasing.
 	 * Exit DPD and wait until flash is ready.
 	 */
@@ -1332,6 +1374,7 @@ static int spi_nor_configure(const struct device *dev)
 		rc = spi_nor_wait_until_ready(dev, WAIT_READY_REGISTER);
 	}
 	release_device(dev);
+    (void)pm_device_runtime_put(dev);
 	if (rc < 0) {
 		LOG_ERR("Failed to wait until flash is ready (%d)", rc);
 		return -ENODEV;
@@ -1367,6 +1410,10 @@ static int spi_nor_configure(const struct device *dev)
 	 * that powers up with block protect enabled.
 	 */
 	if (cfg->has_lock != 0) {
+        if (pm_device_runtime_get(dev)) {
+            return -ENODEV;
+        }
+
 		acquire_device(dev);
 
 		rc = spi_nor_rdsr(dev);
@@ -1377,6 +1424,7 @@ static int spi_nor_configure(const struct device *dev)
 		}
 
 		release_device(dev);
+		(void)pm_device_runtime_put(dev);
 
 		if (rc != 0) {
 			LOG_ERR("BP clear failed: %d\n", rc);
@@ -1509,7 +1557,19 @@ static int spi_nor_init(const struct device *dev)
 	}
 #endif /* ANY_INST_HAS_HOLD_GPIOS */
 
-	return pm_device_driver_init(dev, spi_nor_pm_control);
+#ifdef CONFIG_PM_DEVICE_RUNTIME
+	if (pm_device_on_power_domain(dev)) {
+		pm_device_init_off(dev);
+	} else {
+		pm_device_init_suspended(dev);
+		if (spi_nor_configure(dev)) {
+			return -ENODEV;
+		}
+	}
+	return pm_device_runtime_enable(dev);
+#else
+	return spi_nor_configure(dev);
+#endif
 }
 
 #if defined(CONFIG_FLASH_PAGE_LAYOUT)
