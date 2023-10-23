@@ -241,6 +241,7 @@
 			clocks = <&rcc STM32_CLOCK_BUS_APB2 0x00004000>;
 			resets = <&rctl STM32_RESET(APB2, 14U)>;
 			interrupts = <36 0>;
+			reinit-power-states = <&stop2>;
 			status = "disabled";
 		};
 
@@ -250,6 +251,7 @@
 			clocks = <&rcc STM32_CLOCK_BUS_APB1 0x00020000>;
 			resets = <&rctl STM32_RESET(APB1L, 17U)>;
 			interrupts = <37 0>;
+			reinit-power-states = <&stop2>;
 			status = "disabled";
 		};
 
@@ -306,6 +308,7 @@
 			reg = <0x40013000 0x400>;
 			interrupts = <34 5>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB2 0x00001000>;
+			reinit-power-states = <&stop2>;
 			status = "disabled";
 		};
 
@@ -316,6 +319,7 @@
 			reg = <0x40003800 0x400>;
 			interrupts = <35 5>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB1 0x00004000>;
+			reinit-power-states = <&stop2>;
 			status = "disabled";
 		};
 
@@ -326,6 +330,7 @@
 			reg = <0x58010000 0x400>;
 			interrupts = <44 5>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB3 0x00000001>;
+			reinit-power-states = <&stop2>;
 			status = "disabled";
 			use-subghzspi-nss;
 
