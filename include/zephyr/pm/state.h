@@ -156,6 +156,16 @@ struct pm_state_info {
 	uint32_t exit_latency_us;
 };
 
+/**
+ * @brief PM state transition direction: state entry bit field value
+ */
+#define PM_STATE_ENTRY        BIT(0)
+
+/**
+ * @brief PM state transition direction: state exit bit field value
+ */
+#define PM_STATE_EXIT         BIT(1)
+
 /** @cond INTERNAL_HIDDEN */
 
 /**
@@ -194,6 +204,18 @@ struct pm_state_info {
 #define Z_PM_STATE_FROM_DT_CPU(i, node_id)                                                        \
 	COND_CODE_1(DT_NODE_HAS_STATUS(DT_PHANDLE_BY_IDX(node_id, cpu_power_states, i), okay),    \
 		    (PM_STATE_DT_INIT(DT_PHANDLE_BY_IDX(node_id, cpu_power_states, i)),), ())
+
+/**
+ * @brief Call a function for an enabled power-state phandle list item
+ *
+ * @param node_id zephyr,power-state node identifier
+ * @param prop Property holding power-state phandle(s)
+ * @param idx Index within the phandle list
+ * @param fn Function taking a power-state node_id
+ */
+#define Z_PM_STATE_DT_PHANDLE_GEN(node_id, prop, idx, fn)					 \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_PHANDLE_BY_IDX(node_id, cpu_power_states, idx), okay), \
+		    (fn(DT_PHANDLE_BY_IDX(node_id, cpu_power_states, idx))), ())
 
 /** @endcond */
 
@@ -338,6 +360,16 @@ struct pm_state_info {
  * @return Number of supported states.
  */
 uint8_t pm_state_cpu_get_all(uint8_t cpu, const struct pm_state_info **states);
+
+/**
+ * Retrieve the index of a DT power-states array element.
+ *
+ * @param state pm_state state.
+ * @param substate_id pm_state substate ID.
+ *
+ * @return Index of the PM state, or -1.
+ */
+int8_t pm_state_get_index(enum pm_state state, uint8_t substate_id);
 
 /**
  * @}

@@ -26,7 +26,27 @@ LOG_MODULE_REGISTER(pm, CONFIG_PM_LOG_LEVEL);
 	(COND_CODE_1(CONFIG_SMP, (arch_curr_cpu()->id), (_current_cpu->id)))
 
 static ATOMIC_DEFINE(z_post_ops_required, CONFIG_MP_MAX_NUM_CPUS);
-static sys_slist_t pm_notifiers = SYS_SLIST_STATIC_INIT(&pm_notifiers);
+
+/* Active state notifiers list */
+static sys_slist_t pm_notifiers_active = SYS_SLIST_STATIC_INIT(&pm_notifiers_active);
+
+#if CONFIG_MP_NUM_CPUS > 1 && DT_NODE_EXISTS(DT_PATH(cpus, power_states))
+/* Generate a notifier list for each DT power-state */
+DT_FOREACH_CHILD_STATUS_OKAY_SEP(DT_PATH(cpus, power_states), Z_PM_NOTIFIERS_CREATE_DT_STATES, (;));
+
+static sys_slist_t *pm_notifiers_array[] = {
+	DT_FOREACH_CHILD_STATUS_OKAY_SEP(DT_PATH(cpus, power_states), Z_PM_NOTIFIERS_DT_STATES, (,))
+};
+#elif DT_NODE_HAS_PROP(DT_PATH(cpus, cpu_0), cpu_power_states)
+/* Generate a notifier list for each DT cpu-power-state */
+DT_FOREACH_PROP_ELEM_SEP_VARGS(DT_PATH(cpus, cpu_0), cpu_power_states, Z_PM_STATE_DT_PHANDLE_GEN,
+			       (;), Z_PM_NOTIFIERS_CREATE_DT_STATES);
+
+static sys_slist_t *pm_notifiers_array[] = {
+	DT_FOREACH_PROP_ELEM_SEP_VARGS(DT_PATH(cpus, cpu_0), cpu_power_states,
+				       Z_PM_STATE_DT_PHANDLE_GEN, (,), Z_PM_NOTIFIERS_DT_STATES)
+};
+#endif
 
 /*
  * Properly initialize cpu power states. Do not make assumptions that
@@ -110,22 +130,28 @@ static void pm_resume_devices(void)
  * Function called to notify when the system is entering / exiting a
  * power state
  */
-static inline void pm_state_notify(bool entering_state)
+static void pm_state_notify(uint8_t direction)
 {
 	struct pm_notifier *notifier;
+	static sys_slist_t *notifiers;
 	k_spinlock_key_t pm_notifier_key;
-	void (*callback)(enum pm_state state);
+
+	if (z_cpus_pm_state[CURRENT_CPU].state == PM_STATE_ACTIVE) {
+		notifiers = &pm_notifiers_active;
+	} else {
+		int8_t state_idx = pm_state_get_index(z_cpus_pm_state[CURRENT_CPU].state,
+						       z_cpus_pm_state[CURRENT_CPU].substate_id);
+		if (state_idx < 0) {
+			LOG_ERR("Sub/state passed didn't match any enabled system states");
+			return;
+		}
+		notifiers = pm_notifiers_array[state_idx];
+	}
 
 	pm_notifier_key = k_spin_lock(&pm_notifier_lock);
-	SYS_SLIST_FOR_EACH_CONTAINER(&pm_notifiers, notifier, _node) {
-		if (entering_state) {
-			callback = notifier->state_entry;
-		} else {
-			callback = notifier->state_exit;
-		}
-
-		if (callback) {
-			callback(z_cpus_pm_state[_current_cpu->id].state);
+	SYS_SLIST_FOR_EACH_CONTAINER(notifiers, notifier, _node) {
+		if ((direction & notifier->direction) && notifier->callback) {
+			notifier->callback(direction, (void *)notifier->ctx);
 		}
 	}
 	k_spin_unlock(&pm_notifier_lock, pm_notifier_key);
@@ -149,9 +175,12 @@ void pm_system_resume(void)
 	 */
 	if (atomic_test_and_clear_bit(z_post_ops_required, id)) {
 		pm_state_exit_post_ops(z_cpus_pm_state[id].state, z_cpus_pm_state[id].substate_id);
-		pm_state_notify(false);
+		/* Exiting low-power state */
+		pm_state_notify(PM_STATE_EXIT);
 		z_cpus_pm_state[id] = (struct pm_state_info){PM_STATE_ACTIVE,
 			0, 0};
+		/* Entering active state */
+		pm_state_notify(PM_STATE_ENTRY);
 	}
 }
 
@@ -175,6 +204,9 @@ bool pm_system_suspend(int32_t ticks)
 	k_spinlock_key_t key;
 
 	SYS_PORT_TRACING_FUNC_ENTER(pm, system_suspend, ticks);
+
+	/* Exiting active state */
+	pm_state_notify(PM_STATE_EXIT);
 
 	key = k_spin_lock(&pm_forced_state_lock);
 	if (z_cpus_pm_forced_state[id].state != PM_STATE_ACTIVE) {
@@ -233,8 +265,8 @@ bool pm_system_suspend(int32_t ticks)
 	 */
 	k_sched_lock();
 	pm_stats_start();
-	/* Enter power state */
-	pm_state_notify(true);
+	/* Entering low-power state */
+	pm_state_notify(PM_STATE_ENTRY);
 	atomic_set_bit(z_post_ops_required, id);
 	pm_state_set(z_cpus_pm_state[id].state, z_cpus_pm_state[id].substate_id);
 	pm_stats_stop();
@@ -254,21 +286,50 @@ bool pm_system_suspend(int32_t ticks)
 	return true;
 }
 
-void pm_notifier_register(struct pm_notifier *notifier)
+int pm_notifier_register(struct pm_notifier *notifier, enum pm_state state, uint8_t substate_id)
 {
-	k_spinlock_key_t pm_notifier_key = k_spin_lock(&pm_notifier_lock);
-
-	sys_slist_append(&pm_notifiers, &notifier->_node);
-	k_spin_unlock(&pm_notifier_lock, pm_notifier_key);
-}
-
-int pm_notifier_unregister(struct pm_notifier *notifier)
-{
-	int ret = -EINVAL;
+	static sys_slist_t *notifiers;
 	k_spinlock_key_t pm_notifier_key;
 
+	if (state == PM_STATE_ACTIVE) {
+		notifiers = &pm_notifiers_active;
+	} else {
+		int8_t state_idx = pm_state_get_index(state, substate_id);
+
+		if (state_idx < 0) {
+			LOG_ERR("Sub/state passed didn't match any enabled system states");
+			return -EINVAL;
+		}
+		notifiers = pm_notifiers_array[state_idx];
+	}
+
 	pm_notifier_key = k_spin_lock(&pm_notifier_lock);
-	if (sys_slist_find_and_remove(&pm_notifiers, &(notifier->_node))) {
+	sys_slist_append(notifiers, &notifier->_node);
+	k_spin_unlock(&pm_notifier_lock, pm_notifier_key);
+
+	return 0;
+}
+
+int pm_notifier_unregister(struct pm_notifier *notifier, enum pm_state state, uint8_t substate_id)
+{
+	int ret = -EINVAL;
+	static sys_slist_t *notifiers;
+	k_spinlock_key_t pm_notifier_key;
+
+	if (state == PM_STATE_ACTIVE) {
+		notifiers = &pm_notifiers_active;
+	} else {
+		int8_t state_idx = pm_state_get_index(state, substate_id);
+
+		if (state_idx < 0) {
+			LOG_ERR("Sub/state passed didn't match any enabled system states");
+			return -EINVAL;
+		}
+		notifiers = pm_notifiers_array[state_idx];
+	}
+
+	pm_notifier_key = k_spin_lock(&pm_notifier_lock);
+	if (sys_slist_find_and_remove(notifiers, &(notifier->_node))) {
 		ret = 0;
 	}
 	k_spin_unlock(&pm_notifier_lock, pm_notifier_key);
