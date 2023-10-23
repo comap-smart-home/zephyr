@@ -26,6 +26,8 @@ LOG_MODULE_REGISTER(spi_ll_stm32);
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/irq.h>
 #include <zephyr/mem_mgmt/mem_attr.h>
+#include <zephyr/pm/device.h>
+#include <zephyr/pm/policy.h>
 
 #ifdef CONFIG_SOC_SERIES_STM32H7X
 #include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
@@ -509,10 +511,34 @@ static int spi_stm32_configure(const struct device *dev,
 	uint32_t clock;
 	int br;
 
+
+	// If PM is enabled we can loose the config and clock when going into stop2 mode.
+	// In the case we reinit the clocks and the driver on every write/
+	// TODO: optimize the driver by only reinit if PM_SUSPEND was called.
+
+#if defined(CONFIG_PM)
+	int err = clock_control_on(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
+				(clock_control_subsys_t) &cfg->pclken[0]);
+	if (err < 0) {
+		LOG_ERR("Could not enable SPI clock");
+		return err;
+	}
+
+	if (IS_ENABLED(STM32_SPI_DOMAIN_CLOCK_SUPPORT) && (cfg->pclk_len > 1)) {
+		err = clock_control_configure(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
+						(clock_control_subsys_t) &cfg->pclken[1],
+						NULL);
+		if (err < 0) {
+			LOG_ERR("Could not select SPI domain clock");
+			return err;
+		}
+	}
+#else 
 	if (spi_context_configured(&data->ctx, config)) {
 		/* Nothing to do */
 		return 0;
 	}
+#endif
 
 	if ((SPI_WORD_SIZE_GET(config->operation) != 8)
 	    && (SPI_WORD_SIZE_GET(config->operation) != 16)) {
@@ -669,6 +695,7 @@ static int transceive(const struct device *dev,
 #endif
 
 	spi_context_lock(&data->ctx, asynchronous, cb, userdata, config);
+	pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 
 	ret = spi_stm32_configure(dev, config);
 	if (ret) {
@@ -729,7 +756,7 @@ static int transceive(const struct device *dev,
 
 end:
 	spi_context_release(&data->ctx, ret);
-
+	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 	return ret;
 }
 
@@ -836,6 +863,7 @@ static int transceive_dma(const struct device *dev,
 #endif /* CONFIG_SOC_SERIES_STM32H7X */
 
 	spi_context_lock(&data->ctx, asynchronous, cb, userdata, config);
+	pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 
 	k_sem_reset(&data->status_sem);
 
@@ -938,7 +966,7 @@ static int transceive_dma(const struct device *dev,
 
 end:
 	spi_context_release(&data->ctx, ret);
-
+	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 	return ret;
 }
 #endif /* CONFIG_SPI_STM32_DMA */
