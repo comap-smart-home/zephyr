@@ -174,6 +174,8 @@ void pm_system_resume(void)
 	 * and it may schedule another thread.
 	 */
 	if (atomic_test_and_clear_bit(z_post_ops_required, id)) {
+		/* Exiting low-power state */
+		pm_state_notify(PM_STATE_EXIT);
 		pm_state_exit_post_ops(z_cpus_pm_state[id].state, z_cpus_pm_state[id].substate_id);
 		/* Exiting low-power state */
 		pm_state_notify(PM_STATE_EXIT);
