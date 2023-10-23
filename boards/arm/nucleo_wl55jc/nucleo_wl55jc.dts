@@ -70,13 +70,13 @@
 	};
 };
 
-&clk_lsi {
+&clk_lse {
 	status = "okay";
 };
 
 &lptim1 {
 	clocks = <&rcc STM32_CLOCK_BUS_APB1 0x80000000>,
-		 <&rcc STM32_SRC_LSI LPTIM1_SEL(1)>;
+		 <&rcc STM32_SRC_LSE LPTIM1_SEL(3)>;
 	status = "okay";
 };
 
@@ -162,7 +162,7 @@
 };
 
 &iwdg {
-	status = "okay";
+	status = "disabled";
 };
 
 &subghzspi {
