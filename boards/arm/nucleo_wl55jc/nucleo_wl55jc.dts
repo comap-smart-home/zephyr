@@ -169,7 +169,6 @@
 	status = "okay";
 	lora: radio@0 {
 		status = "okay";
-		antenna-enable-gpios = <&gpioc 3 GPIO_ACTIVE_HIGH>;
 		tx-enable-gpios = <&gpioc 4 GPIO_ACTIVE_LOW>; /* FE_CTRL1 */
 		rx-enable-gpios = <&gpioc 5 GPIO_ACTIVE_LOW>; /* FE_CTRL2 */
 		dio3-tcxo-voltage = <SX126X_DIO3_TCXO_1V7>;
