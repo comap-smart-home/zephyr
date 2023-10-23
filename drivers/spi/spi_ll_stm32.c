@@ -27,6 +27,7 @@ LOG_MODULE_REGISTER(spi_ll_stm32);
 #include <zephyr/irq.h>
 #include <zephyr/mem_mgmt/mem_attr.h>
 #include <zephyr/pm/device.h>
+#include <zephyr/pm/device_runtime.h>
 #include <zephyr/pm/policy.h>
 
 #ifdef CONFIG_SOC_SERIES_STM32H7X
@@ -513,10 +514,9 @@ static int spi_stm32_configure(const struct device *dev,
 
 
 	// If PM is enabled we can loose the config and clock when going into stop2 mode.
-	// In the case we reinit the clocks and the driver on every write/
-	// TODO: optimize the driver by only reinit if PM_SUSPEND was called.
+	// In this case we reinit the clocks and the driver on every write
 
-#if defined(CONFIG_PM)
+#if defined(CONFIG_PM) && !defined(CONFIG_PM_DEVICE)
 	int err = clock_control_on(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
 				(clock_control_subsys_t) &cfg->pclken[0]);
 	if (err < 0) {
@@ -696,6 +696,7 @@ static int transceive(const struct device *dev,
 
 	spi_context_lock(&data->ctx, asynchronous, cb, userdata, config);
 	pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	(void)pm_device_runtime_get(dev);
 
 	ret = spi_stm32_configure(dev, config);
 	if (ret) {
@@ -757,6 +758,7 @@ static int transceive(const struct device *dev,
 end:
 	spi_context_release(&data->ctx, ret);
 	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	(void)pm_device_runtime_put(dev);
 	return ret;
 }
 
@@ -864,6 +866,7 @@ static int transceive_dma(const struct device *dev,
 
 	spi_context_lock(&data->ctx, asynchronous, cb, userdata, config);
 	pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	(void)pm_device_runtime_get(dev);
 
 	k_sem_reset(&data->status_sem);
 
@@ -967,6 +970,7 @@ static int transceive_dma(const struct device *dev,
 end:
 	spi_context_release(&data->ctx, ret);
 	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	(void)pm_device_runtime_put(dev);
 	return ret;
 }
 #endif /* CONFIG_SPI_STM32_DMA */
@@ -1085,8 +1089,57 @@ static int spi_stm32_init(const struct device *dev)
 
 	spi_context_unlock_unconditionally(&data->ctx);
 
+	#if defined(CONFIG_PM_DEVICE_RUNTIME)
+	pm_device_init_suspended(dev);
+
+	err = pm_device_runtime_enable(dev);
+
+	if (err < 0 && err != -ENOSYS) {
+		LOG_ERR("Failed to enabled runtime power management");
+		return -EIO;
+	}
+	#endif
+
 	return 0;
 }
+
+
+#ifdef CONFIG_PM_DEVICE
+static int spi_ll_stm32_pm_action(const struct device *dev,
+			       enum pm_device_action action)
+{
+	struct spi_stm32_data *data = dev->data;
+	const struct spi_stm32_config *cfg = dev->config;
+
+	switch (action) {
+	case PM_DEVICE_ACTION_RESUME:
+		int err = clock_control_on(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
+				(clock_control_subsys_t) &cfg->pclken[0]);
+		if (err < 0) {
+			LOG_ERR("Could not enable SPI clock");
+			return err;
+		}
+
+		if (IS_ENABLED(STM32_SPI_DOMAIN_CLOCK_SUPPORT) && (cfg->pclk_len > 1)) {
+			err = clock_control_configure(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
+							(clock_control_subsys_t) &cfg->pclken[1],
+							NULL);
+			if (err < 0) {
+				LOG_ERR("Could not select SPI domain clock");
+				return err;
+			}
+		}
+		break;
+	case PM_DEVICE_ACTION_SUSPEND:
+		data->ctx.config = NULL;
+		break;
+	default:
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+#endif /* CONFIG_PM_DEVICE */
 
 #ifdef CONFIG_SPI_STM32_INTERRUPT
 #define STM32_SPI_IRQ_HANDLER_DECL(id)					\
@@ -1183,8 +1236,9 @@ static struct spi_stm32_data spi_stm32_dev_data_##id = {		\
 	SPI_DMA_STATUS_SEM(id)						\
 	SPI_CONTEXT_CS_GPIOS_INITIALIZE(DT_DRV_INST(id), ctx)		\
 };									\
+PM_DEVICE_DT_INST_DEFINE(id, spi_ll_stm32_pm_action);		        \
 									\
-DEVICE_DT_INST_DEFINE(id, &spi_stm32_init, NULL,			\
+DEVICE_DT_INST_DEFINE(id, &spi_stm32_init, PM_DEVICE_DT_INST_GET(id),			\
 		    &spi_stm32_dev_data_##id, &spi_stm32_cfg_##id,	\
 		    POST_KERNEL, CONFIG_SPI_INIT_PRIORITY,		\
 		    &api_funcs);					\
