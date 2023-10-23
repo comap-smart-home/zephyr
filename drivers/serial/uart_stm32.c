@@ -23,6 +23,7 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/pm/policy.h>
 #include <zephyr/pm/device.h>
+#include <zephyr/pm/device_runtime.h>
 
 #ifdef CONFIG_UART_ASYNC_API
 #include <zephyr/drivers/dma/dma_stm32.h>
@@ -670,6 +671,8 @@ static void uart_stm32_poll_out_visitor(const struct device *dev, void *out, pol
 		 */
 		uart_stm32_pm_policy_state_lock_get(dev);
 
+		(void)pm_device_runtime_get(dev);
+
 		/* Enable TC interrupt so we can release suspend
 		 * constraint when done
 		 */
@@ -1224,6 +1227,7 @@ static void uart_stm32_isr(const struct device *dev)
 			LL_USART_DisableIT_TC(config->usart);
 			data->tx_poll_stream_on = false;
 			uart_stm32_pm_policy_state_lock_put(dev);
+			pm_device_runtime_put(dev);
 		}
 		/* Stream transmission was either async or IRQ based,
 		 * constraint will be released at the same time TC IT
@@ -2006,6 +2010,14 @@ static int uart_stm32_init(const struct device *dev)
 	}
 #endif /* CONFIG_PM */
 
+	// TODO: if pm runtime enabled, do not start uart clock.
+	pm_device_init_suspended(dev);
+	int ret = pm_device_runtime_enable(dev);
+	if (ret < 0 && ret != -ENOSYS) {
+		LOG_ERR("Failed to enabled runtime power management");
+		return -EIO;
+	}
+
 #ifdef CONFIG_UART_ASYNC_API
 	return uart_stm32_async_init(dev);
 #else
@@ -2044,18 +2056,23 @@ static int uart_stm32_pm_action(const struct device *dev,
 
 	switch (action) {
 	case PM_DEVICE_ACTION_RESUME:
-		/* Set pins to active state */
+		err = uart_stm32_clocks_enable(dev);
+		if (err < 0) {
+			return err;
+		}
+
+		/* Configure dt provided device signals when available */
 		err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
 		if (err < 0) {
 			return err;
 		}
 
-		/* enable clock */
-		err = clock_control_on(data->clock, (clock_control_subsys_t)&config->pclken[0]);
+		err = uart_stm32_registers_configure(dev);
 		if (err != 0) {
-			LOG_ERR("Could not enable (LP)UART clock");
+			LOG_ERR("Could not reconfigure (LP)UART");
 			return err;
 		}
+
 		break;
 	case PM_DEVICE_ACTION_SUSPEND:
 		uart_stm32_suspend_setup(dev);
