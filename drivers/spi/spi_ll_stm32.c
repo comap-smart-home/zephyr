@@ -1110,10 +1110,21 @@ static int spi_ll_stm32_pm_action(const struct device *dev,
 {
 	struct spi_stm32_data *data = dev->data;
 	const struct spi_stm32_config *cfg = dev->config;
+	int err;
 
 	switch (action) {
 	case PM_DEVICE_ACTION_RESUME:
-		int err = clock_control_on(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
+		/* Set pins to active state */
+		if (!spi_stm32_is_subghzspi(dev)) {
+			/* Configure dt provided device signals when available */
+			err = pinctrl_apply_state(cfg->pcfg, PINCTRL_STATE_DEFAULT);
+			if (err < 0) {
+				LOG_ERR("SPI pinctrl setup failed (%d)", err);
+				return err;
+			}
+		}
+
+		err = clock_control_on(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
 				(clock_control_subsys_t) &cfg->pclken[0]);
 		if (err < 0) {
 			LOG_ERR("Could not enable SPI clock");
@@ -1132,6 +1143,10 @@ static int spi_ll_stm32_pm_action(const struct device *dev,
 		break;
 	case PM_DEVICE_ACTION_SUSPEND:
 		data->ctx.config = NULL;
+		if (!spi_stm32_is_subghzspi(dev)) {
+			/* Configure dt provided device signals when available */
+			(void)pinctrl_apply_state(cfg->pcfg, PINCTRL_STATE_SLEEP);
+		}
 		break;
 	default:
 		return -ENOTSUP;
