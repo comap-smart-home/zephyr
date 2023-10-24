@@ -1036,7 +1036,9 @@ static void spi_stm32_reinit(uint8_t direction, void *ctx)
 	ARG_UNUSED(direction);
 	const struct device *dev = ctx;
 	const struct spi_stm32_config *cfg = dev->config;
+	struct spi_stm32_data *data = dev->data;
 
+	data->ctx.config = NULL;
 	spi_stm32_clock_configure(cfg);
 }
 #endif /* CONFIG_PM */
