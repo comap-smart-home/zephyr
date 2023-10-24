@@ -17,6 +17,7 @@
 #include <zephyr/drivers/clock_control/stm32_clock_control.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/pm/policy.h>
 #include <soc.h>
 #include <stm32_ll_pwr.h>
 #include <stm32_ll_rcc.h>
@@ -81,7 +82,9 @@ static int rtc_stm32_enter_initialization_mode(bool kernel_available)
 {
 	if (kernel_available) {
 		LL_RTC_EnableInitMode(RTC);
+		pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 		bool success = WAIT_FOR(LL_RTC_IsActiveFlag_INIT(RTC), RTC_TIMEOUT, k_msleep(1));
+		pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 
 		if (!success) {
 			return -EIO;
