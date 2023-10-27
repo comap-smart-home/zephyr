@@ -23,7 +23,6 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/pm/policy.h>
 #include <zephyr/pm/device.h>
-#include <zephyr/pm/device_runtime.h>
 
 #ifdef CONFIG_UART_ASYNC_API
 #include <zephyr/drivers/dma/dma_stm32.h>
@@ -671,8 +670,6 @@ static void uart_stm32_poll_out_visitor(const struct device *dev, void *out, pol
 		 */
 		uart_stm32_pm_policy_state_lock_get(dev);
 
-		(void)pm_device_runtime_get(dev);
-
 		/* Enable TC interrupt so we can release suspend
 		 * constraint when done
 		 */
@@ -1227,7 +1224,6 @@ static void uart_stm32_isr(const struct device *dev)
 			LL_USART_DisableIT_TC(config->usart);
 			data->tx_poll_stream_on = false;
 			uart_stm32_pm_policy_state_lock_put(dev);
-			(void)pm_device_runtime_put_async(dev);
 		}
 		/* Stream transmission was either async or IRQ based,
 		 * constraint will be released at the same time TC IT
@@ -2041,13 +2037,6 @@ static int uart_stm32_init(const struct device *dev)
 		}
 	}
 #endif /* CONFIG_PM */
-
-	// TODO: add support of init in suspended state
-	int ret = pm_device_runtime_enable(dev);
-	if (ret < 0 && ret != -ENOSYS) {
-		LOG_ERR("Failed to enabled runtime power management");
-		return -EIO;
-	}
 
 #ifdef CONFIG_UART_ASYNC_API
 	return uart_stm32_async_init(dev);
