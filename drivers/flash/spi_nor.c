@@ -1371,6 +1371,7 @@ static int spi_nor_configure(const struct device *dev)
 	if (rc < 0) {
 		LOG_ERR("Failed to exit DPD (%d)", rc);
 		release_device(dev);
+    	(void)pm_device_runtime_put(dev);
 		return -ENODEV;
 	}
 
@@ -1616,6 +1617,7 @@ static int spi_nor_init(const struct device *dev)
 		if (spi_nor_configure(dev)) {
 			return -ENODEV;
 		}
+		enter_dpd(dev);
 	}
 	return pm_device_runtime_enable(dev);
 #else
