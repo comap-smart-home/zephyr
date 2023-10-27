@@ -28,6 +28,7 @@ LOG_MODULE_REGISTER(spi_ll_stm32);
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/irq.h>
 #include <zephyr/mem_mgmt/mem_attr.h>
+#include <zephyr/pm/policy.h>
 
 #ifdef CONFIG_DCACHE
 #include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
@@ -793,6 +794,7 @@ static int transceive(const struct device *dev,
 #endif /* CONFIG_SPI_STM32_INTERRUPT */
 
 	spi_context_lock(&data->ctx, asynchronous, cb, userdata, config);
+	pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE , PM_ALL_SUBSTATES);
 
 	spi_stm32_pm_policy_state_lock_get(dev);
 
@@ -889,6 +891,7 @@ static int transceive(const struct device *dev,
 
 end:
 	spi_context_release(&data->ctx, ret);
+	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE , PM_ALL_SUBSTATES);
 
 	return ret;
 }
@@ -999,6 +1002,7 @@ static int transceive_dma(const struct device *dev,
 #endif /* CONFIG_DCACHE */
 
 	spi_context_lock(&data->ctx, asynchronous, cb, userdata, config);
+	pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE , PM_ALL_SUBSTATES);
 
 	spi_stm32_pm_policy_state_lock_get(dev);
 
@@ -1115,6 +1119,7 @@ static int transceive_dma(const struct device *dev,
 
 end:
 	spi_context_release(&data->ctx, ret);
+	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE , PM_ALL_SUBSTATES);
 
 	spi_stm32_pm_policy_state_lock_put(dev);
 
