@@ -237,7 +237,9 @@ void SX126xAntSwOn(void)
 {
 #if HAVE_GPIO_ANTENNA_ENABLE
 	LOG_DBG("Enabling antenna switch");
-	gpio_pin_set_dt(&dev_config.antenna_enable, 1);
+	(void)sx12xx_configure_pin(antenna_enable, GPIO_OUTPUT_ACTIVE);
+	(void)sx12xx_configure_pin(rx_enable, GPIO_OUTPUT);
+	(void)sx12xx_configure_pin(tx_enable, GPIO_OUTPUT);
 #else
 	LOG_DBG("No antenna switch configured");
 #endif
@@ -247,7 +249,9 @@ void SX126xAntSwOff(void)
 {
 #if HAVE_GPIO_ANTENNA_ENABLE
 	LOG_DBG("Disabling antenna switch");
-	gpio_pin_set_dt(&dev_config.antenna_enable, 0);
+	(void)sx12xx_configure_pin(antenna_enable, GPIO_DISCONNECTED);
+	(void)sx12xx_configure_pin(rx_enable, GPIO_DISCONNECTED);
+	(void)sx12xx_configure_pin(tx_enable, GPIO_DISCONNECTED);
 #else
 	LOG_DBG("No antenna switch configured");
 #endif
@@ -435,9 +439,9 @@ static int sx126x_lora_init(const struct device *dev)
 
 	LOG_DBG("Initializing sx126x");
 
-	if (sx12xx_configure_pin(antenna_enable, GPIO_OUTPUT_INACTIVE) ||
-	    sx12xx_configure_pin(rx_enable, GPIO_OUTPUT_INACTIVE) ||
-	    sx12xx_configure_pin(tx_enable, GPIO_OUTPUT_INACTIVE)) {
+	if (sx12xx_configure_pin(antenna_enable, GPIO_DISCONNECTED) ||
+	    sx12xx_configure_pin(rx_enable, GPIO_DISCONNECTED) ||
+	    sx12xx_configure_pin(tx_enable, GPIO_DISCONNECTED)) {
 		return -EIO;
 	}
 
