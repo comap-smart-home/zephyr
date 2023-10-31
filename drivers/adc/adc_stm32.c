@@ -35,14 +35,14 @@
 #define ADC_CONTEXT_ENABLE_ON_COMPLETE
 #include "adc_context.h"
 
-#define LOG_LEVEL CONFIG_ADC_LOG_LEVEL
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(adc_stm32);
+LOG_MODULE_REGISTER(adc_stm32, CONFIG_ADC_LOG_LEVEL);
 
 #include <zephyr/drivers/clock_control/stm32_clock_control.h>
 #include <zephyr/dt-bindings/adc/stm32_adc.h>
 #include <zephyr/irq.h>
 #include <zephyr/mem_mgmt/mem_attr.h>
+#include <zephyr/pm/pm.h>
 
 #ifdef CONFIG_SOC_SERIES_STM32H7X
 #include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
@@ -207,6 +207,11 @@ struct adc_stm32_cfg {
 	int8_t num_sampling_time_common_channels;
 	int8_t sequencer_type;
 	int8_t res_table_size;
+#ifdef CONFIG_PM
+	struct pm_notifier *notifier;
+	const struct pm_state_info *reinit_states;
+	size_t reinit_states_size;
+#endif
 	const uint32_t res_table[];
 };
 
@@ -1228,54 +1233,17 @@ static int adc_stm32_set_clock(const struct device *dev)
 	return 0;
 }
 
-static int adc_stm32_init(const struct device *dev)
-{
-	struct adc_stm32_data *data = dev->data;
+static int adc_stm32_configure_clk_and_registers(const struct device *dev) {
 	const struct adc_stm32_cfg *config = dev->config;
-	const struct device *const clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
 	ADC_TypeDef *adc = (ADC_TypeDef *)config->base;
 	int err;
 
-	LOG_DBG("Initializing %s", dev->name);
-
-	if (!device_is_ready(clk)) {
-		LOG_ERR("clock control device not ready");
-		return -ENODEV;
-	}
-
-	data->dev = dev;
-
-	/*
-	 * For series that use common channels for sampling time, all
-	 * conversion time for all channels on one ADC instance has to
-	 * be the same.
-	 * For series that use two common channels, currently only one
-	 * of the two available common channel conversion times is used.
-	 * This additional variable is for checking if the conversion time
-	 * selection of all channels on one ADC instance is the same.
-	 */
-	data->acq_time_index = -1;
-
 	adc_stm32_set_clock(dev);
 
-	/* Configure dt provided device signals when available */
-	err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
-	if (err < 0) {
-		LOG_ERR("ADC pinctrl setup failed (%d)", err);
-		return err;
-	}
 #if defined(CONFIG_SOC_SERIES_STM32U5X)
 	/* Enable the independent analog supply */
 	LL_PWR_EnableVDDA();
 #endif /* CONFIG_SOC_SERIES_STM32U5X */
-
-#ifdef CONFIG_ADC_STM32_DMA
-	if ((data->dma.dma_dev != NULL) &&
-	    !device_is_ready(data->dma.dma_dev)) {
-		LOG_ERR("%s device not ready", data->dma.dma_dev->name);
-		return -ENODEV;
-	}
-#endif
 
 #if defined(CONFIG_SOC_SERIES_STM32L4X) || \
 	defined(CONFIG_SOC_SERIES_STM32L5X) || \
@@ -1351,6 +1319,93 @@ static int adc_stm32_init(const struct device *dev)
 		);
 	}
 #endif
+	return 0;
+}
+
+#ifdef CONFIG_PM
+/**
+ * @brief Reinitialization of ADC context
+ *
+ * This function reenables clocks, which is required upon exiting certain
+ * low-power modes on select SoCs.
+ *
+ * @param dev ADC device struct
+ *
+ * @return 0
+ */
+static void adc_stm32_reinit(uint8_t direction, void *ctx)
+{
+	ARG_UNUSED(direction);
+	const struct device *dev = ctx;
+	const struct adc_stm32_cfg *config = dev->config;
+
+	if (direction == PM_STATE_EXIT) {
+		LOG_DBG("Exit pm mode");
+		(void)adc_stm32_configure_clk_and_registers(dev);
+	} else {
+		LOG_DBG("Entering pm mode");
+		adc_stm32_disable(config->base);
+	}
+}
+#endif /* CONFIG_PM */
+
+static int adc_stm32_init(const struct device *dev)
+{
+	struct adc_stm32_data *data = dev->data;
+	const struct adc_stm32_cfg *config = dev->config;
+	const struct device *const clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
+	int err;
+
+	ARG_UNUSED(config);
+
+	LOG_DBG("Initializing %s", dev->name);
+
+	if (!device_is_ready(clk)) {
+		LOG_ERR("clock control device not ready");
+		return -ENODEV;
+	}
+
+	#ifdef CONFIG_ADC_STM32_DMA
+		if ((data->dma.dma_dev != NULL) &&
+			!device_is_ready(data->dma.dma_dev)) {
+			LOG_ERR("%s device not ready", data->dma.dma_dev->name);
+			return -ENODEV;
+		}
+	#endif
+
+	data->dev = dev;
+
+	/*
+	 * For series that use common channels for sampling time, all
+	 * conversion time for all channels on one ADC instance has to
+	 * be the same.
+	 * For series that use two common channels, currently only one
+	 * of the two available common channel conversion times is used.
+	 * This additional variable is for checking if the conversion time
+	 * selection of all channels on one ADC instance is the same.
+	 */
+	data->acq_time_index = -1;
+
+	if (adc_stm32_configure_clk_and_registers(dev)) {
+		return -ENODEV;
+	}
+
+	/* Configure dt provided device signals when available */
+	err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
+	if (err < 0) {
+		LOG_ERR("ADC pinctrl setup failed (%d)", err);
+		return err;
+	}
+
+#ifdef CONFIG_PM
+	if (config->reinit_states_size > 0) {
+		for (size_t i = 0; i < config->reinit_states_size; i++) {
+			pm_notifier_register(config->notifier, config->reinit_states[i].state,
+					     config->reinit_states[i].substate_id);
+		}
+	}
+#endif /* CONFIG_PM */
+
 	adc_context_unlock_unconditionally(&data->ctx);
 
 	return 0;
@@ -1486,12 +1541,30 @@ static void adc_stm32_cfg_func_##index(void)				\
 
 #endif /* CONFIG_ADC_STM32_DMA && CONFIG_ADC_STM32_SHARED_IRQS */
 
+#ifdef CONFIG_PM
+#define STM32_ADC_REINIT_STATE_INIT(index)					\
+	static const struct pm_state_info reinit_states_##index[]		\
+		= PM_STATE_INFO_LIST_FROM_DT_REINIT(DT_DRV_INST(index))
+
+#define STM32_ADC_REINIT_CFG_INIT(index)					\
+	.notifier = &PM_NOTIFIER(DT_INST_DEP_ORD(index)),			\
+	.reinit_states = reinit_states_##index,				\
+	.reinit_states_size = ARRAY_SIZE(reinit_states_##index),
+#else
+#define STM32_ADC_REINIT_STATE_INIT(index)
+#define STM32_ADC_REINIT_CFG_INIT(index)
+#endif /* CONFIG_PM */
 
 #define ADC_STM32_INIT(index)						\
 									\
 PINCTRL_DT_INST_DEFINE(index);						\
 									\
 ADC_STM32_IRQ_CONFIG(index)						\
+									\
+STM32_ADC_REINIT_STATE_INIT(index);					\
+									\
+PM_NOTIFIER_DEFINE(DT_INST_DEP_ORD(index), PM_STATE_EXIT | PM_STATE_ENTRY,			\
+		   adc_stm32_reinit, DEVICE_DT_INST_GET(index));		\
 									\
 static const struct stm32_pclken pclken_##index[] =			\
 				 STM32_DT_INST_CLOCKS(index);		\
@@ -1508,6 +1581,7 @@ static const struct adc_stm32_cfg adc_stm32_cfg_##index = {		\
 	.num_sampling_time_common_channels =				\
 		DT_INST_PROP_OR(index, num_sampling_time_common_channels, 0),\
 	.res_table_size = DT_INST_PROP_LEN(index, resolutions),		\
+	STM32_ADC_REINIT_CFG_INIT(index)					\
 	.res_table = DT_INST_PROP(index, resolutions),			\
 };									\
 									\
