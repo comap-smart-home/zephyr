@@ -7,6 +7,8 @@
 
 #include <zephyr/drivers/clock_control/stm32_clock_control.h>
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/pm/pm.h>
+#include <zephyr/pm/policy.h>
 #include <zephyr/pm/device.h>
 #include <zephyr/pm/device_runtime.h>
 #include <zephyr/sys/util.h>
@@ -23,10 +25,9 @@
 #include "i2c_bitbang.h"
 #endif /* CONFIG_I2C_STM32_BUS_RECOVERY */
 
-#define LOG_LEVEL CONFIG_I2C_LOG_LEVEL
 #include <zephyr/logging/log.h>
 #include <zephyr/irq.h>
-LOG_MODULE_REGISTER(i2c_ll_stm32);
+LOG_MODULE_REGISTER(i2c_ll_stm32, CONFIG_I2C_LOG_LEVEL);
 
 #include "i2c-priv.h"
 
@@ -333,30 +334,12 @@ static int i2c_stm32_activate(const struct device *dev)
 	return 0;
 }
 
-
-static int i2c_stm32_init(const struct device *dev)
+int i2c_stm32_configure_clk_and_registers(const struct device *dev) 
 {
 	const struct device *const clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
 	const struct i2c_stm32_config *cfg = dev->config;
 	uint32_t bitrate_cfg;
 	int ret;
-	struct i2c_stm32_data *data = dev->data;
-#ifdef CONFIG_I2C_STM32_INTERRUPT
-	k_sem_init(&data->device_sync_sem, 0, K_SEM_MAX_LIMIT);
-	cfg->irq_config_func(dev);
-#endif
-
-	/*
-	 * initialize mutex used when multiple transfers
-	 * are taking place to guarantee that each one is
-	 * atomic and has exclusive access to the I2C bus.
-	 */
-	k_sem_init(&data->bus_mutex, 1, 1);
-
-	if (!device_is_ready(clk)) {
-		LOG_ERR("clock control device not ready");
-		return -ENODEV;
-	}
 
 	i2c_stm32_activate(dev);
 
@@ -392,10 +375,77 @@ static int i2c_stm32_init(const struct device *dev)
 
 #ifdef CONFIG_PM_DEVICE_RUNTIME
 	i2c_stm32_suspend(dev);
+#endif
+	return 0;
+}
+
+#ifdef CONFIG_PM
+/**
+ * @brief Reinitialization of I2C context
+ *
+ * This function reenables clocks, which is required upon exiting certain
+ * low-power modes on select SoCs.
+ *
+ * @param dev I2C device struct
+ *
+ * @return 0
+ */
+static void i2c_stm32_reinit(uint8_t direction, void *ctx)
+{
+	const struct device *dev = ctx;
+	const struct i2c_stm32_config *cfg = dev->config;
+
+	if (direction == PM_STATE_EXIT) {
+		LOG_DBG("Exit stop state");
+		i2c_stm32_configure_clk_and_registers(dev);
+	} else {
+		LOG_DBG("Entering stop state");
+		LL_I2C_Disable(cfg->i2c);
+	}
+}
+#endif /* CONFIG_PM */
+
+static int i2c_stm32_init(const struct device *dev)
+{
+	const struct device *const clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
+	const struct i2c_stm32_config *cfg = dev->config;
+	struct i2c_stm32_data *data = dev->data;
+	ARG_UNUSED(cfg);
+
+#ifdef CONFIG_I2C_STM32_INTERRUPT
+	k_sem_init(&data->device_sync_sem, 0, K_SEM_MAX_LIMIT);
+	cfg->irq_config_func(dev);
+#endif
+
+	/*
+	 * initialize mutex used when multiple transfers
+	 * are taking place to guarantee that each one is
+	 * atomic and has exclusive access to the I2C bus.
+	 */
+	k_sem_init(&data->bus_mutex, 1, 1);
+
+	if (!device_is_ready(clk)) {
+		LOG_ERR("clock control device not ready");
+		return -ENODEV;
+	}
+
+	if (i2c_stm32_configure_clk_and_registers(dev)) {
+		return -ENODEV;
+	}
+
+#ifdef CONFIG_PM_DEVICE_RUNTIME
 	pm_device_init_suspended(dev);
 	(void)pm_device_runtime_enable(dev);
 #endif
 
+#ifdef CONFIG_PM
+	if (cfg->reinit_states_size > 0) {
+		for (size_t i = 0; i < cfg->reinit_states_size; i++) {
+			pm_notifier_register(cfg->notifier, cfg->reinit_states[i].state,
+					     cfg->reinit_states[i].substate_id);
+		}
+	}
+#endif /* CONFIG_PM */
 	return 0;
 }
 
@@ -407,10 +457,14 @@ static int i2c_stm32_pm_action(const struct device *dev, enum pm_device_action a
 
 	switch (action) {
 	case PM_DEVICE_ACTION_RESUME:
+		pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 		err = i2c_stm32_activate(dev);
+		LOG_DBG("PM_DEVICE_ACTION_RESUME");
 		break;
 	case PM_DEVICE_ACTION_SUSPEND:
 		err = i2c_stm32_suspend(dev);
+		pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+		LOG_DBG("PM_DEVICE_ACTION_SUSPEND");
 		break;
 	default:
 		return -ENOTSUP;
@@ -488,12 +542,31 @@ static void i2c_stm32_irq_config_func_##index(const struct device *dev)	\
 #define USE_TIMINGS(index)
 #endif /* V2 */
 
+#ifdef CONFIG_PM
+#define STM32_I2C_REINIT_STATE_INIT(index)					\
+	static const struct pm_state_info reinit_states_##index[]		\
+		= PM_STATE_INFO_LIST_FROM_DT_REINIT(DT_DRV_INST(index))
+
+#define STM32_I2C_REINIT_CFG_INIT(index)					\
+	.notifier = &PM_NOTIFIER(DT_INST_DEP_ORD(index)),			\
+	.reinit_states = reinit_states_##index,				\
+	.reinit_states_size = ARRAY_SIZE(reinit_states_##index),
+#else
+#define STM32_I2C_REINIT_STATE_INIT(index)
+#define STM32_I2C_REINIT_CFG_INIT(index)
+#endif /* CONFIG_PM */
+
 #define STM32_I2C_INIT(index)						\
 STM32_I2C_IRQ_HANDLER_DECL(index);					\
 									\
 DEFINE_TIMINGS(index)							\
 									\
 PINCTRL_DT_INST_DEFINE(index);						\
+									\
+STM32_I2C_REINIT_STATE_INIT(index);					\
+									\
+PM_NOTIFIER_DEFINE(DT_INST_DEP_ORD(index), PM_STATE_ENTRY | PM_STATE_EXIT,			\
+		   i2c_stm32_reinit, DEVICE_DT_INST_GET(index));		\
 									\
 static const struct stm32_pclken pclken_##index[] =			\
 				 STM32_DT_INST_CLOCKS(index);		\
@@ -508,6 +581,7 @@ static const struct i2c_stm32_config i2c_stm32_cfg_##index = {		\
 	I2C_STM32_SCL_INIT(index)					\
 	I2C_STM32_SDA_INIT(index)					\
 	USE_TIMINGS(index)						\
+	STM32_I2C_REINIT_CFG_INIT(index)					\
 };									\
 									\
 static struct i2c_stm32_data i2c_stm32_dev_data_##index;		\

@@ -46,6 +46,11 @@ struct i2c_stm32_config {
 	const struct i2c_config_timing *timings;
 	size_t n_timings;
 #endif
+#ifdef CONFIG_PM
+	struct pm_notifier *notifier;
+	const struct pm_state_info *reinit_states;
+	size_t reinit_states_size;
+#endif
 };
 
 struct i2c_stm32_data {
