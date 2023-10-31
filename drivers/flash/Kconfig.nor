@@ -75,4 +75,18 @@ config SPI_NOR_IDLE_IN_DPD
 	  long periods, and when used the impact of waiting for mode
 	  enter and exit delays is acceptable.
 
+config SPI_NOR_SMART_IDLE
+	bool "Use Smart Idle mode"
+	default y
+	help
+	   This mode will put compatible flash in deep power-down mode 
+	   to reduce current drawn after beeing not used for some time
+if SPI_NOR_SMART_IDLE
+
+config SPI_NOR_SMART_IDLE_TIMEOUT_US
+	int "Time before flash is put into deep power down mode"
+	default 100
+
+endif
+
 endif # SPI_NOR

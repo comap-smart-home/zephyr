@@ -14,6 +14,7 @@
 #include <zephyr/drivers/flash.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/kernel.h>
 #include <zephyr/init.h>
 #include <string.h>
 #include <zephyr/logging/log.h>
@@ -171,6 +172,12 @@ struct spi_nor_data {
 #endif /* CONFIG_FLASH_PAGE_LAYOUT */
 #endif /* CONFIG_SPI_NOR_SFDP_RUNTIME */
 #endif /* CONFIG_SPI_NOR_SFDP_MINIMAL */
+
+#ifdef CONFIG_SPI_NOR_SMART_IDLE
+	struct k_work_delayable dpd_work;
+	const struct device *dev;
+	bool is_in_dpd;
+#endif
 };
 
 #ifdef CONFIG_SPI_NOR_SFDP_MINIMAL
@@ -677,7 +684,7 @@ static int mxicy_configure(const struct device *dev, const uint8_t *jedec_id)
 	}
 
 	if (ret < 0) {
-		LOG_ERR("Enable high performace mode failed: %d", ret);
+		LOG_ERR("Enable high performance mode failed: %d", ret);
 	}
 
 exit:
@@ -1354,11 +1361,28 @@ static int spi_nor_configure(const struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_SPI_NOR_SMART_IDLE
+static void dpd_work_handler(struct k_work *work)
+{
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct spi_nor_data *data = CONTAINER_OF(dwork, struct spi_nor_data, dpd_work);
+	const struct device *dev = data->dev;
+	acquire_device(dev);
+	enter_dpd(dev);
+	data->is_in_dpd = true;
+	release_device(dev);
+}
+#endif
+
 #ifdef CONFIG_PM_DEVICE
 
 static int spi_nor_pm_control(const struct device *dev, enum pm_device_action action)
 {
+#ifdef CONFIG_SPI_NOR_SMART_IDLE
+	struct spi_nor_data *data = dev->data;
+#endif
 	int rc = 0;
+
 
 	switch (action) {
 #ifdef CONFIG_SPI_NOR_IDLE_IN_DPD
@@ -1367,14 +1391,31 @@ static int spi_nor_pm_control(const struct device *dev, enum pm_device_action ac
 		break;
 #else
 	case PM_DEVICE_ACTION_SUSPEND:
+#ifdef CONFIG_SPI_NOR_SMART_IDLE
+		// dpd schedule resume
+		k_work_schedule(&data->dpd_work, K_USEC(CONFIG_SPI_NOR_SMART_IDLE_TIMEOUT_US));
+#else
 		acquire_device(dev);
 		rc = enter_dpd(dev);
 		release_device(dev);
+#endif
 		break;
 	case PM_DEVICE_ACTION_RESUME:
+#ifdef CONFIG_SPI_NOR_SMART_IDLE
+		// dpd schedule cancel
+		struct k_work_sync sync;
+		k_work_cancel_delayable_sync(&data->dpd_work, &sync);
+		if (data->is_in_dpd) {
+			acquire_device(dev);
+			rc = exit_dpd(dev);
+			data->is_in_dpd = false;
+			release_device(dev);
+		}
+#else
 		acquire_device(dev);
 		rc = exit_dpd(dev);
 		release_device(dev);
+#endif
 		break;
 #endif /* CONFIG_SPI_NOR_IDLE_IN_DPD */
 	case PM_DEVICE_ACTION_TURN_ON:
@@ -1400,9 +1441,10 @@ static int spi_nor_pm_control(const struct device *dev, enum pm_device_action ac
  */
 static int spi_nor_init(const struct device *dev)
 {
-	if (IS_ENABLED(CONFIG_MULTITHREADING)) {
-		struct spi_nor_data *const driver_data = dev->data;
+	struct spi_nor_data *const driver_data = dev->data;
+	ARG_UNUSED(driver_data);
 
+	if (IS_ENABLED(CONFIG_MULTITHREADING)) {
 		k_sem_init(&driver_data->sem, 1, K_SEM_MAX_LIMIT);
 	}
 
@@ -1430,6 +1472,12 @@ static int spi_nor_init(const struct device *dev)
 		}
 	}
 #endif /* ANY_INST_HAS_HOLD_GPIOS */
+
+#ifdef CONFIG_SPI_NOR_SMART_IDLE
+	driver_data->dev = dev;
+	driver_data->is_in_dpd = true;
+	k_work_init_delayable(&driver_data->dpd_work, dpd_work_handler);
+#endif
 
 #ifdef CONFIG_PM_DEVICE_RUNTIME
 	if (pm_device_on_power_domain(dev)) {
