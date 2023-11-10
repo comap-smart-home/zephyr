@@ -45,7 +45,8 @@ LOG_MODULE_REGISTER(i2c_ll_stm32, CONFIG_I2C_LOG_LEVEL);
 #define STM32_I2C_DOMAIN_CLOCK_SUPPORT 0
 #endif
 
-int i2c_stm32_runtime_configure(const struct device *dev, uint32_t config)
+
+int i2c_stm32_configure(const struct device *dev, uint32_t config)
 {
 	const struct i2c_stm32_config *cfg = dev->config;
 	struct i2c_stm32_data *data = dev->data;
@@ -55,21 +56,30 @@ int i2c_stm32_runtime_configure(const struct device *dev, uint32_t config)
 
 	if (IS_ENABLED(STM32_I2C_DOMAIN_CLOCK_SUPPORT) && (cfg->pclk_len > 1)) {
 		if (clock_control_get_rate(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
-					   (clock_control_subsys_t)&cfg->pclken[1],
-					   &clock) < 0) {
+					   (clock_control_subsys_t)&cfg->pclken[1], &clock) < 0) {
 			LOG_ERR("Failed call clock_control_get_rate(pclken[1])");
 			return -EIO;
 		}
 	} else {
 		if (clock_control_get_rate(DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE),
-					   (clock_control_subsys_t) &cfg->pclken[0],
-					   &clock) < 0) {
+					   (clock_control_subsys_t)&cfg->pclken[0], &clock) < 0) {
 			LOG_ERR("Failed call clock_control_get_rate(pclken[0])");
 			return -EIO;
 		}
 	}
 
 	data->dev_config = config;
+	LL_I2C_Disable(i2c);
+	LL_I2C_SetMode(i2c, LL_I2C_MODE_I2C);
+	ret = stm32_i2c_configure_timing(dev, clock);
+
+	return ret;
+}
+
+int i2c_stm32_runtime_configure(const struct device *dev, uint32_t config)
+{
+	struct i2c_stm32_data *data = dev->data;
+	int ret;
 
 	k_sem_take(&data->bus_mutex, K_FOREVER);
 
@@ -79,9 +89,7 @@ int i2c_stm32_runtime_configure(const struct device *dev, uint32_t config)
 	pm_device_busy_set(dev);
 #endif
 
-	LL_I2C_Disable(i2c);
-	LL_I2C_SetMode(i2c, LL_I2C_MODE_I2C);
-	ret = stm32_i2c_configure_timing(dev, clock);
+	ret = i2c_stm32_configure(dev, config);
 
 #ifdef CONFIG_PM_DEVICE_RUNTIME
 	(void)pm_device_runtime_put(dev);
@@ -94,10 +102,10 @@ int i2c_stm32_runtime_configure(const struct device *dev, uint32_t config)
 	return ret;
 }
 
-#define OPERATION(msg) (((struct i2c_msg *) msg)->flags & I2C_MSG_RW_MASK)
+#define OPERATION(msg) (((struct i2c_msg *)msg)->flags & I2C_MSG_RW_MASK)
 
-static int i2c_stm32_transfer(const struct device *dev, struct i2c_msg *msg,
-			      uint8_t num_msgs, uint16_t slave)
+static int i2c_stm32_transfer(const struct device *dev, struct i2c_msg *msg, uint8_t num_msgs,
+			      uint16_t slave)
 {
 	struct i2c_stm32_data *data = dev->data;
 	struct i2c_msg *current, *next;
@@ -269,7 +277,6 @@ restore:
 }
 #endif /* CONFIG_I2C_STM32_BUS_RECOVERY */
 
-
 static const struct i2c_driver_api api_funcs = {
 	.configure = i2c_stm32_runtime_configure,
 	.transfer = i2c_stm32_transfer,
@@ -325,8 +332,7 @@ static int i2c_stm32_activate(const struct device *dev)
 	}
 
 	/* Enable device clock. */
-	if (clock_control_on(clk,
-			     (clock_control_subsys_t) &cfg->pclken[0]) != 0) {
+	if (clock_control_on(clk, (clock_control_subsys_t)&cfg->pclken[0]) != 0) {
 		LOG_ERR("i2c: failure enabling clock");
 		return -EIO;
 	}
@@ -334,7 +340,7 @@ static int i2c_stm32_activate(const struct device *dev)
 	return 0;
 }
 
-int i2c_stm32_configure_clk_and_registers(const struct device *dev) 
+int i2c_stm32_configure_clk_and_registers(const struct device *dev)
 {
 	const struct device *const clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
 	const struct i2c_stm32_config *cfg = dev->config;
@@ -345,9 +351,7 @@ int i2c_stm32_configure_clk_and_registers(const struct device *dev)
 
 	if (IS_ENABLED(STM32_I2C_DOMAIN_CLOCK_SUPPORT) && (cfg->pclk_len > 1)) {
 		/* Enable I2C clock source */
-		ret = clock_control_configure(clk,
-					(clock_control_subsys_t) &cfg->pclken[1],
-					NULL);
+		ret = clock_control_configure(clk, (clock_control_subsys_t)&cfg->pclken[1], NULL);
 		if (ret < 0) {
 			return -EIO;
 		}
@@ -367,7 +371,7 @@ int i2c_stm32_configure_clk_and_registers(const struct device *dev)
 
 	bitrate_cfg = i2c_map_dt_bitrate(cfg->bitrate);
 
-	ret = i2c_stm32_runtime_configure(dev, I2C_MODE_CONTROLLER | bitrate_cfg);
+	ret = i2c_stm32_configure(dev, I2C_MODE_CONTROLLER | bitrate_cfg);
 	if (ret < 0) {
 		LOG_ERR("i2c: failure initializing");
 		return ret;
