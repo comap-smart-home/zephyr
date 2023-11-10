@@ -347,7 +347,11 @@ int i2c_stm32_configure_clk_and_registers(const struct device *dev)
 	uint32_t bitrate_cfg;
 	int ret;
 
-	i2c_stm32_activate(dev);
+	/* Enable device clock. */
+	if (clock_control_on(clk, (clock_control_subsys_t)&cfg->pclken[0]) != 0) {
+		LOG_ERR("i2c: failure enabling clock");
+		return -EIO;
+	}
 
 	if (IS_ENABLED(STM32_I2C_DOMAIN_CLOCK_SUPPORT) && (cfg->pclk_len > 1)) {
 		/* Enable I2C clock source */
@@ -377,9 +381,6 @@ int i2c_stm32_configure_clk_and_registers(const struct device *dev)
 		return ret;
 	}
 
-#ifdef CONFIG_PM_DEVICE_RUNTIME
-	i2c_stm32_suspend(dev);
-#endif
 	return 0;
 }
 
@@ -440,6 +441,13 @@ static int i2c_stm32_init(const struct device *dev)
 #ifdef CONFIG_PM_DEVICE_RUNTIME
 	pm_device_init_suspended(dev);
 	(void)pm_device_runtime_enable(dev);
+#else
+	/* Move pins to active/default state */
+	int ret = pinctrl_apply_state(cfg->pcfg, PINCTRL_STATE_DEFAULT);
+	if (ret < 0) {
+		LOG_ERR("I2C pinctrl setup failed (%d)", ret);
+		return ret;
+	}
 #endif
 
 #ifdef CONFIG_PM
