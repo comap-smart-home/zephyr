@@ -1237,6 +1237,8 @@ static int adc_stm32_configure_clk_and_registers(const struct device *dev) {
 	const struct adc_stm32_cfg *config = dev->config;
 	ADC_TypeDef *adc = (ADC_TypeDef *)config->base;
 	int err;
+	
+	adc_stm32_disable(adc);
 
 	adc_stm32_set_clock(dev);
 
@@ -1337,15 +1339,8 @@ static void adc_stm32_reinit(uint8_t direction, void *ctx)
 {
 	ARG_UNUSED(direction);
 	const struct device *dev = ctx;
-	const struct adc_stm32_cfg *config = dev->config;
 
-	if (direction == PM_STATE_EXIT) {
-		LOG_DBG("Exit pm mode");
-		(void)adc_stm32_configure_clk_and_registers(dev);
-	} else {
-		LOG_DBG("Entering pm mode");
-		adc_stm32_disable(config->base);
-	}
+	(void)adc_stm32_configure_clk_and_registers(dev);
 }
 #endif /* CONFIG_PM */
 
@@ -1563,7 +1558,7 @@ ADC_STM32_IRQ_CONFIG(index)						\
 									\
 STM32_ADC_REINIT_STATE_INIT(index);					\
 									\
-PM_NOTIFIER_DEFINE(DT_INST_DEP_ORD(index), PM_STATE_EXIT | PM_STATE_ENTRY,			\
+PM_NOTIFIER_DEFINE(DT_INST_DEP_ORD(index), PM_STATE_EXIT,			\
 		   adc_stm32_reinit, DEVICE_DT_INST_GET(index));		\
 									\
 static const struct stm32_pclken pclken_##index[] =			\
