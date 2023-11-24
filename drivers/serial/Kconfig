@@ -25,6 +25,12 @@ config SERIAL_SUPPORT_ASYNC
 	  This is an option to be enabled by individual serial driver
 	  to signal that the driver and hardware supports async operation.
 
+config SERIAL_SUPPORT_STAY_AWAKE
+	bool
+	help
+	  This is an option to be enabled by individual serial driver
+	  to signal that the driver support the stay awake feature.
+
 config SERIAL_SUPPORT_INTERRUPT
 	bool
 	help
@@ -147,6 +153,13 @@ config UART_ASYNC_TO_INT_DRIVEN_RX_TIMEOUT
 	default 100
 	help
 	  Receiver inactivity timeout. It is used to calculate timeout in microseconds.
+
+config UART_STAY_AWAKE
+	bool "Stay Awake Feature"
+	depends on SERIAL_SUPPORT_STAY_AWAKE
+	help
+	  This option enables the stay awake feature.
+
 
 comment "Serial Drivers"
 

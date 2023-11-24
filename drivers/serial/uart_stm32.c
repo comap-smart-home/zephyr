@@ -122,6 +122,8 @@ static void uart_stm32_pm_policy_state_lock_put(const struct device *dev)
 	}
 }
 
+#ifdef CONFIG_UART_STAY_AWAKE
+
 static bool uart_stm32_stay_awake_enabled(const struct device *dev)
 {
 	const struct uart_stm32_config *config = dev->config;
@@ -234,6 +236,7 @@ static int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
 	return 0;
 }
 
+#endif /* CONFIG_UART_STAY_AWAKE */
 #endif /* CONFIG_PM */
 
 static inline void uart_stm32_set_baudrate(const struct device *dev, uint32_t baud_rate)
@@ -1367,11 +1370,12 @@ static void uart_stm32_isr(const struct device *dev)
 		 * is disabled
 		 */
 	}
-
+#ifdef CONFIG_UART_STAY_AWAKE
 	if (LL_USART_IsEnabledIT_RXNE(config->usart) &&
 			LL_USART_IsActiveFlag_RXNE(config->usart)) {
 		uart_stm32_stay_awake_on_rx(dev);
 	}
+#endif
 #endif
 
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
@@ -2258,11 +2262,13 @@ static int uart_stm32_init(const struct device *dev)
 	}
 #endif /* CONFIG_PM */
 
+#ifdef CONFIG_UART_STAY_AWAKE
 	err = uart_stm32_stay_awake_init(dev);
 	if (err) {
 		LOG_ERR("Cant register callback");
 		return err;
 	}
+#endif
 
 #ifdef CONFIG_UART_ASYNC_API
 	return uart_stm32_async_init(dev);
@@ -2445,6 +2451,13 @@ static void uart_stm32_irq_config_func_##index(const struct device *dev)	\
 #define STM32_UART_PM_WAKEUP(index) /* Not used */
 #endif
 
+#ifdef CONFIG_UART_STAY_AWAKE
+#define STM32_UART_STAY_AWAKE_CFG_INIT(index) \
+	.rx_spec = GPIO_DT_SPEC_INST_GET_OR(index, rx_gpios, {0}), \
+	.stay_awake_time_ms = DT_INST_PROP_OR(index, stay_awake_time_ms, 0), 
+#else
+#define STM32_UART_STAY_AWAKE_CFG_INIT(index)
+#endif
 /* Ensure DTS doesn't present an incompatible parity configuration.
  * Mark/space parity isn't supported on the STM32 family.
  * If 9 data bits are configured, ensure that a parity bit isn't set.
@@ -2588,8 +2601,7 @@ static const struct uart_stm32_config uart_stm32_cfg_##index = {	\
 	.de_deassert_time = DT_INST_PROP(index, de_deassert_time),	\
 	.de_invert = DT_INST_PROP(index, de_invert),			\
 	.fifo_enable = DT_INST_PROP(index, fifo_enable),		\
-	.rx_spec = GPIO_DT_SPEC_INST_GET_OR(index, rx_gpios, {0}), \
-	.stay_awake_time_ms = DT_INST_PROP_OR(index, stay_awake_time_ms, 0), \
+	STM32_UART_STAY_AWAKE_CFG_INIT(index)				\
 	STM32_UART_IRQ_HANDLER_FUNC(index)				\
 	STM32_UART_PM_WAKEUP(index)					\
 };									\
