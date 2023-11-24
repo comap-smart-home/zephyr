@@ -25,6 +25,12 @@ config SERIAL_SUPPORT_ASYNC
 	  This is an option to be enabled by individual serial driver
 	  to signal that the driver and hardware supports async operation.
 
+config SERIAL_SUPPORT_STAY_AWAKE
+	bool
+	help
+	  This is an option to be enabled by individual serial driver
+	  to signal that the driver support the stay awake feature.
+
 config SERIAL_SUPPORT_INTERRUPT
 	bool
 	help
@@ -124,6 +130,13 @@ config UART_PIPE
 	  over UART with custom defined protocol. Driver doesn't inspect received
 	  data (as contrary to console UART driver) and all aspects of received
 	  protocol data are handled by application provided callback.
+
+config UART_STAY_AWAKE
+	bool "Stay Awake Feature"
+	depends on SERIAL_SUPPORT_STAY_AWAKE
+	help
+	  This option enables the stay awake feature.
+
 
 comment "Serial Drivers"
 
