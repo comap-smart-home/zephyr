@@ -11,6 +11,7 @@ include:
   - name: pinctrl-device.yaml
   - name: reset-device.yaml
   - name: uart-controller-pin-inversion.yaml
+  - name: uart-stay-awake.yaml
 
 properties:
   reg:
@@ -35,8 +36,7 @@ properties:
 
   tx-rx-swap:
     type: boolean
-    description:
-      Swap the TX and RX pins. Used in case of a cross wired connection.
+    description: Swap the TX and RX pins. Used in case of a cross wired connection.
 
   pinctrl-0:
     required: true

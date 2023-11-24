@@ -121,7 +121,121 @@ static void uart_stm32_pm_policy_state_lock_put(const struct device *dev)
 		}
 	}
 }
+
 #endif /* CONFIG_PM */
+
+#ifdef CONFIG_UART_STAY_AWAKE
+
+static bool uart_stm32_stay_awake_enabled(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+
+	return config->stay_awake_time_ms != 0;
+}
+
+static void uart_stm32_stay_awake_on_rx(const struct device *dev)
+{
+	struct uart_stm32_data *data = dev->data;
+	data->has_rx = true;
+}
+
+static void rx_fall_callback_handler(const struct device *port,
+					struct gpio_callback *cb,
+					gpio_port_pins_t pins)
+{
+	struct uart_stm32_data *data = CONTAINER_OF(cb, struct uart_stm32_data, rx_fall_handler);
+	const struct device *dev = data->dev;
+	const struct uart_stm32_config *config = dev->config;
+	int rc;
+
+	rc = gpio_pin_interrupt_configure_dt(&config->rx_spec, GPIO_INT_DISABLE);
+	if (rc) {
+		LOG_ERR("Can't deactivate (LP)UART interrupt");
+	}
+
+	rc = k_work_schedule(&data->stay_awake_work, K_MSEC(config->stay_awake_time_ms));
+	if (rc < 0) {
+		LOG_ERR("Error while scheduling work");
+		return;
+	}
+
+	// if just submited
+	if (rc == 1) {
+		pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+		LOG_DBG("Enabling stay awake mode for %dms", config->stay_awake_time_ms);
+	}
+}
+
+static void uart_stm32_stay_awake_work_handler(struct k_work *work) {
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct uart_stm32_data *data = CONTAINER_OF(dwork, struct uart_stm32_data, stay_awake_work);
+	const struct device *dev = data->dev;
+	const struct uart_stm32_config *config = dev->config;
+
+	if ( data->has_rx ) {
+		data->has_rx = false;
+		k_work_reschedule(dwork, K_MSEC(config->stay_awake_time_ms));
+		return;
+	}
+	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	LOG_DBG("Disabling stay awake mode");
+}
+
+static int uart_stm32_stay_awake_init(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	struct uart_stm32_data *data = dev->data;
+	int err;
+
+	if (!uart_stm32_stay_awake_enabled(dev)) {
+		return 0;
+	}
+
+	data->dev = dev;
+
+	gpio_init_callback(&data->rx_fall_handler, rx_fall_callback_handler, BIT(config->rx_spec.pin));
+	err = gpio_add_callback_dt(&config->rx_spec, &data->rx_fall_handler);
+	if (err) {
+		return err;
+	}
+	k_work_init_delayable(&data->stay_awake_work, uart_stm32_stay_awake_work_handler);
+	data->has_rx = false;
+	return 0;
+}
+
+static int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	int err;
+
+	if (!uart_stm32_stay_awake_enabled(dev)) {
+		return 0;
+	}
+	err = gpio_pin_configure_dt(&config->rx_spec, GPIO_INPUT | GPIO_PULL_UP);
+	if (err) {
+		LOG_ERR("Cant reconfigure (LP)UART rx gpio");
+		return err;
+	}
+	err = gpio_pin_interrupt_configure_dt(&config->rx_spec, GPIO_INT_EDGE_FALLING);
+	if (err) {
+		LOG_ERR("Cant configure (LP)UART interrupt");
+		return err;
+	}
+	return 0;
+}
+#elif defined(CONFIG_PM_DEVICE)
+
+static bool uart_stm32_stay_awake_enabled(const struct device *dev)
+{
+	return 0;
+}
+
+static int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
+{
+	return 0;
+}
+
+#endif /* CONFIG_UART_STAY_AWAKE */
 
 static inline void uart_stm32_set_baudrate(const struct device *dev, uint32_t baud_rate)
 {
@@ -1262,7 +1376,15 @@ static void uart_stm32_isr(const struct device *dev)
 	}
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
+#ifdef CONFIG_UART_STAY_AWAKE
+	if (LL_USART_IsEnabledIT_RXNE(usart) &&
+			LL_USART_IsActiveFlag_RXNE(usart)) {
+		uart_stm32_stay_awake_on_rx(dev);
+	}
+#endif
+
 #ifdef CONFIG_UART_ASYNC_API
+	if (LL_USART_IsEnabledDMAReq_RX(usart) || LL_USART_IsEnabledDMAReq_RX(usart)) {
 	if (LL_USART_IsEnabledIT_IDLE(usart) &&
 			LL_USART_IsActiveFlag_IDLE(usart)) {
 
@@ -1300,6 +1422,7 @@ static void uart_stm32_isr(const struct device *dev)
 
 	/* Clear errors */
 	uart_stm32_err_check(dev);
+	}
 #endif /* CONFIG_UART_ASYNC_API */
 
 #if defined(CONFIG_PM) && defined(IS_UART_WAKEUP_FROMSTOP_INSTANCE) \
@@ -2125,6 +2248,14 @@ static int uart_stm32_init(const struct device *dev)
 	config->irq_config_func(dev);
 #endif /* CONFIG_PM || CONFIG_UART_INTERRUPT_DRIVEN || CONFIG_UART_ASYNC_API */
 
+#ifdef CONFIG_UART_STAY_AWAKE
+	err = uart_stm32_stay_awake_init(dev);
+	if (err) {
+		LOG_ERR("Cant register callback");
+		return err;
+	}
+#endif
+
 #ifdef CONFIG_UART_ASYNC_API
 	return uart_stm32_async_init(dev);
 #else
@@ -2178,7 +2309,7 @@ static int uart_stm32_pm_action(const struct device *dev,
 			return err;
 		}
 
-		if ((IS_ENABLED(CONFIG_PM_S2RAM)) &&
+		if ((IS_ENABLED(CONFIG_PM_S2RAM) || IS_ENABLED(CONFIG_SOC_SERIES_STM32WLX)) &&
 			(!LL_USART_IsEnabled(config->usart))) {
 			/* When exiting low power mode, check whether UART is enabled.
 			 * If not, it means we are exiting Suspend to RAM mode (STM32
@@ -2196,17 +2327,24 @@ static int uart_stm32_pm_action(const struct device *dev,
 			return err;
 		}
 
-		/* Move pins to sleep state */
-		err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_SLEEP);
-		if ((err < 0) && (err != -ENOENT)) {
-			/*
-			 * If returning -ENOENT, no pins where defined for sleep mode :
-			 * Do not output on console (might sleep already) when going to sleep,
-			 * "(LP)UART pinctrl sleep state not available"
-			 * and don't block PM suspend.
-			 * Else return the error.
-			 */
-			return err;
+		if (uart_stm32_stay_awake_enabled(dev)) {
+			err = uart_stm32_stay_awake_from_pm_suspend(dev);
+			if (err) {
+				return err;
+			}
+		} else {
+			/* Move pins to sleep state */
+			err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_SLEEP);
+			if ((err < 0) && (err != -ENOENT)) {
+				/*
+				* If returning -ENOENT, no pins where defined for sleep mode :
+				* Do not output on console (might sleep already) when going to sleep,
+				* "(LP)UART pinctrl sleep state not available"
+				* and don't block PM suspend.
+				* Else return the error.
+				*/
+				return err;
+			}
 		}
 		break;
 	default:
@@ -2295,6 +2433,13 @@ static void uart_stm32_irq_config_func_##index(const struct device *dev)	\
 #define STM32_UART_PM_WAKEUP(index) /* Not used */
 #endif
 
+#ifdef CONFIG_UART_STAY_AWAKE
+#define STM32_UART_STAY_AWAKE_CFG_INIT(index) \
+	.rx_spec = GPIO_DT_SPEC_INST_GET_OR(index, rx_gpios, {0}), \
+	.stay_awake_time_ms = DT_INST_PROP_OR(index, stay_awake_time_ms, 0),
+#else
+#define STM32_UART_STAY_AWAKE_CFG_INIT(index)
+#endif
 /* Ensure DTS doesn't present an incompatible parity configuration.
  * Mark/space parity isn't supported on the STM32 family.
  * If 9 data bits are configured, ensure that a parity bit isn't set.
@@ -2438,6 +2583,7 @@ static const struct uart_stm32_config uart_stm32_cfg_##index = {	\
 	.de_deassert_time = DT_INST_PROP(index, de_deassert_time),	\
 	.de_invert = DT_INST_PROP(index, de_invert),			\
 	.fifo_enable = DT_INST_PROP(index, fifo_enable),		\
+	STM32_UART_STAY_AWAKE_CFG_INIT(index)				\
 	STM32_UART_IRQ_HANDLER_FUNC(index)				\
 	STM32_UART_PM_WAKEUP(index)					\
 };									\
