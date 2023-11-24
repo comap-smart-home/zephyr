@@ -13,6 +13,7 @@
 #define ZEPHYR_DRIVERS_SERIAL_UART_STM32_H_
 
 #include <zephyr/drivers/pinctrl.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/reset.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/pm/pm.h>
@@ -50,6 +51,9 @@ struct uart_stm32_config {
 	uint8_t de_deassert_time;
 	/* enable de pin inversion */
 	bool de_invert;
+	/* stay awake functionality */
+	struct gpio_dt_spec rx_spec;
+	uint32_t stay_awake_time_ms; 
 	/* pin muxing */
 	const struct pinctrl_dev_config *pcfg;
 #if defined(CONFIG_UART_INTERRUPT_DRIVEN) || defined(CONFIG_UART_ASYNC_API) || \
@@ -106,6 +110,9 @@ struct uart_stm32_data {
 	uint8_t *rx_next_buffer;
 	size_t rx_next_buffer_len;
 #endif
+	const struct device *dev;
+	struct gpio_callback rx_fall_handler;
+	struct k_work_delayable stay_awake_work;
 #ifdef CONFIG_PM
 	bool tx_poll_stream_on;
 	bool tx_int_stream_on;
