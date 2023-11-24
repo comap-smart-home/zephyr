@@ -127,9 +127,14 @@ static void uart_stm32_stay_awake_on_rx(const struct device *dev)
 		return;
 	}
 	
-	// Return if the work is not planned (ie: not scheduled or already running)
-	if (k_work_delayable_busy_get(&data->stay_awake_work) != K_WORK_DELAYED) {
-		return;
+	switch (k_work_delayable_busy_get(&data->stay_awake_work)) {
+		case 0: // Work not started, pm state lock not applied
+			pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+			break;
+		case K_WORK_DELAYED: // pm_policy_state_lock_get already ran, just rest the work delay
+			break;
+		default:
+			return;
 	}
 
 	int rc = k_work_reschedule(&data->stay_awake_work, K_MSEC(config->stay_awake_time_ms));
