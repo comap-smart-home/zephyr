@@ -108,6 +108,119 @@ static void uart_stm32_pm_policy_state_lock_put(const struct device *dev)
 		pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 	}
 }
+
+static bool uart_stm32_stay_awake_enabled(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	
+	return config->stay_awake_time_ms != 0;
+}
+
+static void uart_stm32_stay_awake_on_rx(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	struct uart_stm32_data *data = dev->data;
+
+	if (!uart_stm32_stay_awake_enabled(dev)) {
+		return;
+	}
+	
+	// Return if the work is not planned (ie: not scheduled or already running)
+	if (k_work_delayable_busy_get(&data->stay_awake_work) != K_WORK_DELAYED) {
+		return;
+	}
+
+	int rc = k_work_reschedule(&data->stay_awake_work, K_MSEC(config->stay_awake_time_ms));
+	if (rc < 0) {
+		LOG_ERR("Err while scheduling work");
+		return;
+	}
+}
+
+static void rx_fall_callback_handler(const struct device *port,
+					struct gpio_callback *cb,
+					gpio_port_pins_t pins)
+{
+	struct uart_stm32_data *data = CONTAINER_OF(cb, struct uart_stm32_data, rx_fall_handler);
+	const struct device *dev = data->dev;
+	const struct uart_stm32_config *config = dev->config;
+
+	int rc = k_work_schedule(&data->stay_awake_work, K_MSEC(config->stay_awake_time_ms));
+	if (rc < 0) {
+		LOG_ERR("Err while scheduling work");
+		return;
+	}
+
+	// if just submited
+	if (rc == 1) {
+		pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+		LOG_DBG("Enabling stay awake mode for %dms", config->stay_awake_time_ms);
+	}
+}
+
+static void uart_stm32_stay_awake_work_handler(struct k_work *work) {
+	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	LOG_DBG("Disabling stay awake mode");
+}
+
+static int uart_stm32_stay_awake_init(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	struct uart_stm32_data *data = dev->data;
+	int err;
+
+	if (!uart_stm32_stay_awake_enabled(dev)) {
+		return 0;
+	}
+
+	data->dev = dev;
+
+	gpio_init_callback(&data->rx_fall_handler, rx_fall_callback_handler, BIT(config->rx_spec.pin));
+	err = gpio_add_callback_dt(&config->rx_spec, &data->rx_fall_handler);
+	if (err) {
+		return err;
+	}
+	k_work_init_delayable(&data->stay_awake_work, uart_stm32_stay_awake_work_handler);
+	return 0;
+}
+
+static int uart_stm32_stay_awake_from_pm_resume(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	int err;
+
+	if (!uart_stm32_stay_awake_enabled(dev)) {
+		return 0;
+	}
+	err = gpio_pin_interrupt_configure_dt(&config->rx_spec, GPIO_INT_DISABLE);
+	if (err) {
+		LOG_ERR("Cant deactivate (LP)UART interrupt");
+		return err;
+	}
+	return 0;
+}
+
+static int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	int err;
+
+	if (!uart_stm32_stay_awake_enabled(dev)) {
+		return 0;
+	}
+	err = gpio_pin_configure_dt(&config->rx_spec, GPIO_INPUT | GPIO_PULL_UP);
+	if (err) {
+		LOG_ERR("Cant reconfigure (LP)UART rx gpio");
+		return err;
+	}
+	err = gpio_pin_interrupt_configure_dt(&config->rx_spec, GPIO_INT_EDGE_FALLING);
+	if (err) {
+		LOG_ERR("Cant configure (LP)UART interrupt");
+		return err;
+	}
+	return 0;
+}
+
 #endif /* CONFIG_PM */
 
 static inline void uart_stm32_set_baudrate(const struct device *dev, uint32_t baud_rate)
@@ -1230,6 +1343,11 @@ static void uart_stm32_isr(const struct device *dev)
 		 * is disabled
 		 */
 	}
+
+	if (LL_USART_IsEnabledIT_RXNE(config->usart) &&
+			LL_USART_IsActiveFlag_RXNE(config->usart)) {
+		uart_stm32_stay_awake_on_rx(dev);
+	}
 #endif
 
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
@@ -1976,97 +2094,6 @@ static void uart_stm32_reinit(uint8_t direction, void *ctx)
 	uart_stm32_registers_configure(dev);
 }
 #endif /* CONFIG_PM */
-
-void rx_fall_callback_handler(const struct device *port,
-					struct gpio_callback *cb,
-					gpio_port_pins_t pins)
-{
-	struct uart_stm32_data *data = CONTAINER_OF(cb, struct uart_stm32_data, rx_fall_handler);
-	const struct device *dev = data->dev;
-	const struct uart_stm32_config *config = dev->config;
-
-	int rc = k_work_schedule(&data->stay_awake_work, K_MSEC(config->stay_awake_time_ms));
-	if (rc < 0) {
-		LOG_ERR("Err while scheduling work");
-		return;
-	}
-
-	// if just submited
-	if (rc == 1) {
-		LOG_DBG("Enabling stay awake mode for %dms", config->stay_awake_time_ms);
-		pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
-	}
-}
-
-bool uart_stm32_stay_awake_enabled(const struct device *dev)
-{
-	const struct uart_stm32_config *config = dev->config;
-	
-	return config->stay_awake_time_ms != 0;
-}
-
-void uart_stm32_stay_awake_work_handler(struct k_work *work) {
-	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
-	LOG_DBG("Disabling stay awake mode");
-}
-
-int uart_stm32_stay_awake_init(const struct device *dev)
-{
-	const struct uart_stm32_config *config = dev->config;
-	struct uart_stm32_data *data = dev->data;
-	int err;
-
-	if (!uart_stm32_stay_awake_enabled(dev)) {
-		return 0;
-	}
-
-	data->dev = dev;
-
-	gpio_init_callback(&data->rx_fall_handler, rx_fall_callback_handler, BIT(config->rx_spec.pin));
-	err = gpio_add_callback_dt(&config->rx_spec, &data->rx_fall_handler);
-	if (err) {
-		return err;
-	}
-	k_work_init_delayable(&data->stay_awake_work, uart_stm32_stay_awake_work_handler);
-	return 0;
-}
-
-int uart_stm32_stay_awake_from_pm_resume(const struct device *dev)
-{
-	const struct uart_stm32_config *config = dev->config;
-	int err;
-
-	if (!uart_stm32_stay_awake_enabled(dev)) {
-		return 0;
-	}
-	err = gpio_pin_interrupt_configure_dt(&config->rx_spec, GPIO_INT_DISABLE);
-	if (err) {
-		LOG_ERR("Cant deactivate (LP)UART interrupt");
-		return err;
-	}
-	return 0;
-}
-
-int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
-{
-	const struct uart_stm32_config *config = dev->config;
-	int err;
-
-	if (!uart_stm32_stay_awake_enabled(dev)) {
-		return 0;
-	}
-	err = gpio_pin_configure_dt(&config->rx_spec, GPIO_INPUT | GPIO_PULL_UP);
-	if (err) {
-		LOG_ERR("Cant reconfigure (LP)UART rx gpio");
-		return err;
-	}
-	err = gpio_pin_interrupt_configure_dt(&config->rx_spec, GPIO_INT_EDGE_FALLING);
-	if (err) {
-		LOG_ERR("Cant configure (LP)UART interrupt");
-		return err;
-	}
-	return 0;
-}
 
 /**
  * @brief Initialize UART channel
