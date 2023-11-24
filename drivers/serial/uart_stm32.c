@@ -2088,6 +2088,97 @@ static int uart_stm32_registers_configure(const struct device *dev)
 	return 0;
 }
 
+void rx_fall_callback_handler(const struct device *port,
+					struct gpio_callback *cb,
+					gpio_port_pins_t pins)
+{
+	struct uart_stm32_data *data = CONTAINER_OF(cb, struct uart_stm32_data, rx_fall_handler);
+	const struct device *dev = data->dev;
+	const struct uart_stm32_config *config = dev->config;
+
+	int rc = k_work_schedule(&data->stay_awake_work, K_MSEC(config->stay_awake_time_ms));
+	if (rc < 0) {
+		LOG_ERR("Err while scheduling work");
+		return;
+	}
+
+	// if just submited
+	if (rc == 1) {
+		LOG_DBG("Enabling stay awake mode for %dms", config->stay_awake_time_ms);
+		pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	}
+}
+
+bool uart_stm32_stay_awake_enabled(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	
+	return config->stay_awake_time_ms != 0;
+}
+
+void uart_stm32_stay_awake_work_handler(struct k_work *work) {
+	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
+	LOG_DBG("Disabling stay awake mode");
+}
+
+int uart_stm32_stay_awake_init(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	struct uart_stm32_data *data = dev->data;
+	int err;
+
+	if (!uart_stm32_stay_awake_enabled(dev)) {
+		return 0;
+	}
+
+	data->dev = dev;
+
+	gpio_init_callback(&data->rx_fall_handler, rx_fall_callback_handler, BIT(config->rx_spec.pin));
+	err = gpio_add_callback_dt(&config->rx_spec, &data->rx_fall_handler);
+	if (err) {
+		return err;
+	}
+	k_work_init_delayable(&data->stay_awake_work, uart_stm32_stay_awake_work_handler);
+	return 0;
+}
+
+int uart_stm32_stay_awake_from_pm_resume(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	int err;
+
+	if (!uart_stm32_stay_awake_enabled(dev)) {
+		return 0;
+	}
+	err = gpio_pin_interrupt_configure_dt(&config->rx_spec, GPIO_INT_DISABLE);
+	if (err) {
+		LOG_ERR("Cant deactivate (LP)UART interrupt");
+		return err;
+	}
+	return 0;
+}
+
+int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	int err;
+
+	if (!uart_stm32_stay_awake_enabled(dev)) {
+		return 0;
+	}
+	err = gpio_pin_configure_dt(&config->rx_spec, GPIO_INPUT | GPIO_PULL_UP);
+	if (err) {
+		LOG_ERR("Cant reconfigure (LP)UART rx gpio");
+		return err;
+	}
+	err = gpio_pin_interrupt_configure_dt(&config->rx_spec, GPIO_INT_EDGE_FALLING);
+	if (err) {
+		LOG_ERR("Cant configure (LP)UART interrupt");
+		return err;
+	}
+	return 0;
+}
+
 /**
  * @brief Initialize UART channel
  *
@@ -2124,6 +2215,27 @@ static int uart_stm32_init(const struct device *dev)
 	defined(CONFIG_UART_ASYNC_API)
 	config->irq_config_func(dev);
 #endif /* CONFIG_PM || CONFIG_UART_INTERRUPT_DRIVEN || CONFIG_UART_ASYNC_API */
+
+#if defined(CONFIG_PM) && defined(IS_UART_WAKEUP_FROMSTOP_INSTANCE)
+	if (config->wakeup_source) {
+		/* Enable ability to wakeup device in Stop mode
+		 * Effect depends on CONFIG_PM_DEVICE status:
+		 * CONFIG_PM_DEVICE=n : Always active
+		 * CONFIG_PM_DEVICE=y : Controlled by pm_device_wakeup_enable()
+		 */
+		LL_USART_EnableInStopMode(config->usart);
+		if (config->wakeup_line != STM32_EXTI_LINE_NONE) {
+			/* Prepare the WAKEUP with the expected EXTI line */
+			LL_EXTI_EnableIT_0_31(BIT(config->wakeup_line));
+		}
+	}
+#endif /* CONFIG_PM */
+
+	err = uart_stm32_stay_awake_init(dev);
+	if (err) {
+		LOG_ERR("Cant register callback");
+		return err;
+	}
 
 #ifdef CONFIG_UART_ASYNC_API
 	return uart_stm32_async_init(dev);
@@ -2164,6 +2276,10 @@ static int uart_stm32_pm_action(const struct device *dev,
 
 	switch (action) {
 	case PM_DEVICE_ACTION_RESUME:
+		err = uart_stm32_stay_awake_from_pm_resume(dev);
+		if (err) {
+			return err;
+		}
 		/* Set pins to active state */
 		err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
 		if (err < 0) {
@@ -2196,17 +2312,24 @@ static int uart_stm32_pm_action(const struct device *dev,
 			return err;
 		}
 
-		/* Move pins to sleep state */
-		err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_SLEEP);
-		if ((err < 0) && (err != -ENOENT)) {
-			/*
-			 * If returning -ENOENT, no pins where defined for sleep mode :
-			 * Do not output on console (might sleep already) when going to sleep,
-			 * "(LP)UART pinctrl sleep state not available"
-			 * and don't block PM suspend.
-			 * Else return the error.
-			 */
-			return err;
+		if (uart_stm32_stay_awake_enabled(dev)) {
+			err = uart_stm32_stay_awake_from_pm_suspend(dev);
+			if (err) {
+				return err;
+			}
+		} else {
+			/* Move pins to sleep state */
+			err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_SLEEP);
+			if ((err < 0) && (err != -ENOENT)) {
+				/*
+				* If returning -ENOENT, no pins where defined for sleep mode :
+				* Do not output on console (might sleep already) when going to sleep,
+				* "(LP)UART pinctrl sleep state not available"
+				* and don't block PM suspend.
+				* Else return the error.
+				*/
+				return err;
+			}
 		}
 		break;
 	default:
@@ -2438,6 +2561,8 @@ static const struct uart_stm32_config uart_stm32_cfg_##index = {	\
 	.de_deassert_time = DT_INST_PROP(index, de_deassert_time),	\
 	.de_invert = DT_INST_PROP(index, de_invert),			\
 	.fifo_enable = DT_INST_PROP(index, fifo_enable),		\
+	.rx_spec = GPIO_DT_SPEC_INST_GET_OR(index, rx_gpios, {0}), \
+	.stay_awake_time_ms = DT_INST_PROP_OR(index, stay_awake_time_ms, 0), \
 	STM32_UART_IRQ_HANDLER_FUNC(index)				\
 	STM32_UART_PM_WAKEUP(index)					\
 };									\
