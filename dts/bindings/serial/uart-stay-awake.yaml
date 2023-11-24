@@ -1,0 +1,16 @@
+# Common fields for UART controllers
+
+properties:
+  stay-awake-time-ms:
+    type: int
+    default: 0
+    description: |
+      Time in milliseconds where the driver (and if needed, the system) 
+      stays awake after receiving a falling edge on the rx pin.
+      If 0, deactivate the stay awake mode.
+
+  rx-gpios:
+    type: phandle-array
+    description: |
+      GPIO to which the RX UART signal is routed.
+      Used by the stay awake functionality.

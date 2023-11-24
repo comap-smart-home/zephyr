@@ -11,6 +11,7 @@ include:
   - name: pinctrl-device.yaml
   - name: reset-device.yaml
   - name: uart-controller-pin-inversion.yaml
+  - name: uart-stay-awake.yaml
 
 properties:
   reg:
