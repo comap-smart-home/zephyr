@@ -227,6 +227,22 @@ static int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
 	}
 	return 0;
 }
+#else
+
+static bool uart_stm32_stay_awake_enabled(const struct device *dev)
+{
+	return 0;
+}
+
+static int uart_stm32_stay_awake_from_pm_resume(const struct device *dev)
+{
+	return 0;
+}
+
+static int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
+{
+	return 0;
+}
 
 #endif /* CONFIG_UART_STAY_AWAKE */
 #endif /* CONFIG_PM */
