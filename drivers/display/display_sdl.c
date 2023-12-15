@@ -21,6 +21,7 @@ LOG_MODULE_REGISTER(display_sdl);
 struct sdl_display_config {
 	uint16_t height;
 	uint16_t width;
+	uint16_t zoom_percent;
 };
 
 struct sdl_display_data {
@@ -54,7 +55,7 @@ static int sdl_display_init(const struct device *dev)
 #endif /* SDL_DISPLAY_DEFAULT_PIXEL_FORMAT */
 		;
 
-	int rc = sdl_display_init_bottom(config->height, config->width, &disp_data->window,
+	int rc = sdl_display_init_bottom(config->height, config->width, config->zoom_percent, &disp_data->window,
 					 &disp_data->renderer, &disp_data->texture);
 
 	if (rc != 0) {
@@ -363,6 +364,7 @@ static const struct display_driver_api sdl_display_api = {
 	static const struct sdl_display_config sdl_config_##n = {	\
 		.height = DT_INST_PROP(n, height),			\
 		.width = DT_INST_PROP(n, width),			\
+		.zoom_percent = DT_INST_PROP(n, zoom_percent),			\
 	};								\
 									\
 	static uint8_t sdl_buf_##n[4 * DT_INST_PROP(n, height)		\

@@ -5,4 +5,12 @@ description: SDL based emulated display controller
 
 compatible: "zephyr,sdl-dc"
 
+properties:
+  zoom_percent:
+    type: int
+    required: false
+    default: 100
+    description: |
+      Zoom factor.
+
 include: display-controller.yaml
