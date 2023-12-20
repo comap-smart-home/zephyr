@@ -667,7 +667,7 @@ static int entropy_stm32_rng_pm_action(const struct device *dev,
 	case PM_DEVICE_ACTION_RESUME:
 		res = clock_control_on(dev_data->clock,
 				(clock_control_subsys_t)&dev_cfg->pclken[0]);
-		LL_RNG_Enable(rng);
+		configure_rng();
 		break;
 	default:
 		return -ENOTSUP;
