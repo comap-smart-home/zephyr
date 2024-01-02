@@ -122,6 +122,8 @@ static void uart_stm32_pm_policy_state_lock_put(const struct device *dev)
 	}
 }
 
+#endif /* CONFIG_PM */
+
 #ifdef CONFIG_UART_STAY_AWAKE
 
 static bool uart_stm32_stay_awake_enabled(const struct device *dev)
@@ -240,7 +242,7 @@ static int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
 	}
 	return 0;
 }
-#else
+#elif defined(CONFIG_PM_DEVICE)
 
 static bool uart_stm32_stay_awake_enabled(const struct device *dev)
 {
@@ -258,7 +260,6 @@ static int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
 }
 
 #endif /* CONFIG_UART_STAY_AWAKE */
-#endif /* CONFIG_PM */
 
 static inline void uart_stm32_set_baudrate(const struct device *dev, uint32_t baud_rate)
 {
@@ -1391,12 +1392,13 @@ static void uart_stm32_isr(const struct device *dev)
 		 * is disabled
 		 */
 	}
+#endif
+
 #ifdef CONFIG_UART_STAY_AWAKE
 	if (LL_USART_IsEnabledIT_RXNE(config->usart) &&
 			LL_USART_IsActiveFlag_RXNE(config->usart)) {
 		uart_stm32_stay_awake_on_rx(dev);
 	}
-#endif
 #endif
 
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
