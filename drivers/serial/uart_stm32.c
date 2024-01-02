@@ -2313,7 +2313,6 @@ static int uart_stm32_init(const struct device *dev)
 					     config->reinit_states[i].substate_id);
 		}
 	}
-#endif /* CONFIG_PM */
 
 #ifdef CONFIG_UART_STAY_AWAKE
 	err = uart_stm32_stay_awake_init(dev);
@@ -2322,6 +2321,8 @@ static int uart_stm32_init(const struct device *dev)
 		return err;
 	}
 #endif
+#endif /* CONFIG_PM */
+
 
 #ifdef CONFIG_UART_ASYNC_API
 	return uart_stm32_async_init(dev);
