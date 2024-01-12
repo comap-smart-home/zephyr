@@ -169,7 +169,13 @@ struct lorawan_downlink_cb {
 	 */
 	void (*cb)(uint8_t port, bool data_pending,
 		   int16_t rssi, int8_t snr,
-		   uint8_t len, const uint8_t *data);
+		   uint8_t len, const uint8_t *data, void *user_data);
+
+	/**
+	 * @brief User data to be passed to the callback
+	 * 
+	 */
+	void *user_data;
 	/** Node for callback list */
 	sys_snode_t node;
 };
@@ -209,8 +215,9 @@ void lorawan_register_downlink_callback(struct lorawan_downlink_cb *cb);
  *	- dr - updated datarate
  *
  * @param dr_cb Pointer to datarate update callback
+ * @param user_data Data to be passed to the callback
  */
-void lorawan_register_dr_changed_callback(void (*dr_cb)(enum lorawan_datarate));
+void lorawan_register_dr_changed_callback(void (*dr_cb)(enum lorawan_datarate, void *user_data), void *user_data);
 
 /**
  * @brief Join the LoRaWAN network

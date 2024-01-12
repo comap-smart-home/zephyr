@@ -73,7 +73,8 @@ static LoRaMacEventInfoStatus_t last_mlme_indication_status;
 static LoRaMacRegion_t selected_region = DEFAULT_LORAWAN_REGION;
 
 static uint8_t (*get_battery_level_user)(void);
-static void (*dr_change_cb)(enum lorawan_datarate dr);
+static void (*dr_change_cb)(enum lorawan_datarate dr, void *user_data);
+void *dr_change_user_data = NULL;
 
 /* implementation required by the soft-se (software secure element) */
 void BoardGetUniqueId(uint8_t *id)
@@ -106,7 +107,7 @@ static void datarate_observe(bool force_notification)
 	    (force_notification)) {
 		current_datarate = mib_req.Param.ChannelsDatarate;
 		if (dr_change_cb) {
-			dr_change_cb(current_datarate);
+			dr_change_cb(current_datarate, dr_change_user_data);
 		}
 		LOG_INF("Datarate changed: DR_%d", current_datarate);
 	}
@@ -159,7 +160,8 @@ static void mcps_indication_handler(McpsIndication_t *mcps_indication)
 			       mcps_indication->IsUplinkTxPending == 1,
 			       mcps_indication->Rssi, mcps_indication->Snr,
 			       mcps_indication->BufferSize,
-			       mcps_indication->Buffer);
+			       mcps_indication->Buffer,
+				   cb->user_data);
 		}
 	}
 
@@ -637,9 +639,10 @@ void lorawan_register_downlink_callback(struct lorawan_downlink_cb *cb)
 	sys_slist_append(&dl_callbacks, &cb->node);
 }
 
-void lorawan_register_dr_changed_callback(void (*cb)(enum lorawan_datarate))
+void lorawan_register_dr_changed_callback(void (*cb)(enum lorawan_datarate, void *user_data), void *user_data)
 {
 	dr_change_cb = cb;
+	dr_change_user_data = user_data;
 }
 
 int lorawan_start(void)
