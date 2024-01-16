@@ -134,6 +134,8 @@ config UART_PIPE
 config UART_STAY_AWAKE
 	bool "Stay Awake Feature"
 	depends on SERIAL_SUPPORT_STAY_AWAKE
+	depends on PM
+	depends on PM_DEVICE
 	help
 	  This option enables the stay awake feature.
 
