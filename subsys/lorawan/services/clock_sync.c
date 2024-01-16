@@ -12,6 +12,7 @@
 #include "lorawan_services.h"
 
 #include <LoRaMac.h>
+#include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/lorawan/lorawan.h>
 #include <zephyr/logging/log.h>
@@ -238,16 +239,32 @@ static struct lorawan_downlink_cb downlink_cb = {
 
 int lorawan_clock_sync_run(lorawan_clock_sync_clbk clbk, void *user_data)
 {
+	ctx.clbk = clbk;
+	ctx.user_data = user_data;
+
+	lorawan_services_reschedule_work(&ctx.resync_work, K_NO_WAIT);
+	return 0;
+}
+
+int lorawan_clock_sync_stop(void)
+{
+	struct k_work_sync sync;
+	return k_work_cancel_delayable_sync(&ctx.resync_work, &sync);
+}
+
+int lorawan_clock_sync_init(void)
+{
 	ctx.periodicity = CONFIG_LORAWAN_APP_CLOCK_SYNC_PERIODICITY;
 	ctx.not_sync_periodicity = CONFIG_LORAWAN_APP_CLOCK_NOT_SYNC_PERIODICITY;
 
-	ctx.clbk = clbk;
-	ctx.user_data = user_data;
+	ctx.clbk = NULL;
+	ctx.user_data = NULL;
 
 	lorawan_register_downlink_callback(&downlink_cb);
 
 	k_work_init_delayable(&ctx.resync_work, clock_sync_resync_handler);
-	lorawan_services_reschedule_work(&ctx.resync_work, K_NO_WAIT);
 
 	return 0;
 }
+
+SYS_INIT(lorawan_clock_sync_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);

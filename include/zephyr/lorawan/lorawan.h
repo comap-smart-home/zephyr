@@ -358,6 +358,13 @@ typedef void (*lorawan_clock_sync_clbk)(void *user_data);
 int lorawan_clock_sync_run(lorawan_clock_sync_clbk clbk, void *user_data);
 
 /**
+ * @brief Stop the Application Layer Clock Synchronization service
+ * 
+ * @return int same as k_work_cancel_delayable_sync
+ */
+int lorawan_clock_sync_stop(void);
+
+/**
  * @brief Retrieve the current synchronized time
  *
  * This function uses the GPS epoch format, as used in all LoRaWAN services.
