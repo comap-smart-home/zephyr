@@ -37,7 +37,7 @@ static void dl_callback(uint8_t port, bool data_pending,
 	}
 }
 
-static void lorwan_datarate_changed(enum lorawan_datarate dr)
+static void lorwan_datarate_changed(enum lorawan_datarate dr, void *user_data)
 {
 	uint8_t unused, max_size;
 
@@ -83,7 +83,7 @@ int main(void)
 	}
 
 	lorawan_register_downlink_callback(&downlink_cb);
-	lorawan_register_dr_changed_callback(lorwan_datarate_changed);
+	lorawan_register_dr_changed_callback(lorwan_datarate_changed, NULL);
 
 	join_cfg.mode = LORAWAN_ACT_OTAA;
 	join_cfg.dev_eui = dev_eui;
