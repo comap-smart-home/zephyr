@@ -284,7 +284,7 @@ manifest:
         - crypto
     - name: mcuboot
       remote: csh-github
-      revision: 13767d0b72eb14ce42eb8aad1e5a133ef66afc54
+      revision: 5768b441865eb5d7b28486e6109724591e653c43
       path: bootloader/mcuboot
     - name: mipi-sys-t
       path: modules/debug/mipi-sys-t
