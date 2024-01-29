@@ -1,0 +1,22 @@
+/ {
+	aliases {
+		ambient-temp0 = &temp_sens0;
+	};
+};
+
+&i2c1 {
+	status = "okay";
+	// pinctrl-0 -> operating mode
+	pinctrl-0 = <&i2c1_scl_pa9 &i2c1_sda_pa10>;
+	// pinctrl-1 -> sleep mode
+	pinctrl-1 = <&analog_pa9 &analog_pa10>;
+	pinctrl-names = "default", "sleep";
+	clock-frequency = <I2C_BITRATE_FAST>;
+
+	temp_sens0:temp_sens0@44 {
+		status = "okay";
+		compatible = "sensirion,sht4x";
+		reg = <0x44>;
+		repeatability = <2>;
+	};
+};

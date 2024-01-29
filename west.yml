@@ -23,6 +23,8 @@ manifest:
       url-base: https://github.com/zephyrproject-rtos
     - name: babblesim
       url-base: https://github.com/BabbleSim
+    - name: csh-github
+      url-base: https://github.com/comap-smart-home
 
   group-filter: [-babblesim, -optional]
 
@@ -281,6 +283,7 @@ manifest:
       groups:
         - crypto
     - name: mcuboot
+      remote: csh-github
       revision: 13767d0b72eb14ce42eb8aad1e5a133ef66afc54
       path: bootloader/mcuboot
     - name: mipi-sys-t
