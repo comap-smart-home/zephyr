@@ -219,6 +219,12 @@ void lorawan_register_downlink_callback(struct lorawan_downlink_cb *cb);
  */
 void lorawan_register_dr_changed_callback(void (*dr_cb)(enum lorawan_datarate, void *user_data), void *user_data);
 
+
+/**
+ * @brief Test if the we are connected to a LoRaWAN network
+ */
+bool lorawan_is_network_joined(void);
+
 /**
  * @brief Join the LoRaWAN network
  *
@@ -229,6 +235,14 @@ void lorawan_register_dr_changed_callback(void (*dr_cb)(enum lorawan_datarate, v
  * @return 0 if successful, negative errno code if failure
  */
 int lorawan_join(const struct lorawan_join_config *config);
+
+
+/**
+ * @brief Leave the LoRaWAN network
+ * 
+ * @return int 0 if successful, negative errno code if failure
+ */
+int lorawan_leave(void);
 
 /**
  * @brief Start the LoRaWAN stack

@@ -361,6 +361,21 @@ int lorawan_set_region(enum lorawan_region region)
 	return 0;
 }
 
+bool lorawan_is_network_joined(void)
+{
+	MibRequestConfirm_t mibReq;
+	LoRaMacStatus_t status;
+
+	mibReq.Type = MIB_NETWORK_ACTIVATION;
+	status = LoRaMacMibGetRequestConfirm(&mibReq);
+
+	if (status != LORAMAC_STATUS_OK) {
+		return false;
+	}
+
+	return mibReq.Param.NetworkActivation != ACTIVATION_TYPE_NONE;
+}
+
 int lorawan_join(const struct lorawan_join_config *join_cfg)
 {
 	MibRequestConfirm_t mib_req;
@@ -437,6 +452,23 @@ out:
 	k_mutex_unlock(&lorawan_join_mutex);
 	return ret;
 }
+
+
+int lorawan_leave(void)
+{
+	MibRequestConfirm_t mibReq;
+	LoRaMacStatus_t status;
+
+	mibReq.Type = MIB_NETWORK_ACTIVATION;
+	mibReq.Param.NetworkActivation = ACTIVATION_TYPE_NONE;
+
+	k_mutex_lock(&lorawan_join_mutex, K_FOREVER);
+	status = LoRaMacMibSetRequestConfirm(&mibReq);
+	k_mutex_unlock(&lorawan_join_mutex);
+
+	return lorawan_status2errno(status);
+}
+
 
 int lorawan_set_class(enum lorawan_class dev_class)
 {
