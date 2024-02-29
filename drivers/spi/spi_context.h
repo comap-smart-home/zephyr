@@ -92,6 +92,7 @@ static inline void spi_context_lock(struct spi_context *ctx,
 				    void *callback_data,
 				    const struct spi_config *spi_cfg)
 {
+#ifdef CONFIG_MULTITHREADINGING
 	if ((spi_cfg->operation & SPI_LOCK_ON) &&
 		(k_sem_count_get(&ctx->lock) == 0) &&
 		(ctx->owner == spi_cfg)) {
@@ -106,10 +107,12 @@ static inline void spi_context_lock(struct spi_context *ctx,
 	ctx->callback = callback;
 	ctx->callback_data = callback_data;
 #endif /* CONFIG_SPI_ASYNC */
+#endif /* CONFIG_MULTITHREADINGING */
 }
 
 static inline void spi_context_release(struct spi_context *ctx, int status)
 {
+#ifdef CONFIG_MULTITHREADINGING
 #ifdef CONFIG_SPI_SLAVE
 	if (status >= 0 && (ctx->config->operation & SPI_LOCK_ON)) {
 		return;
@@ -127,6 +130,7 @@ static inline void spi_context_release(struct spi_context *ctx, int status)
 		k_sem_give(&ctx->lock);
 	}
 #endif /* CONFIG_SPI_ASYNC */
+#endif /* CONFIG_MULTITHREADINGING */
 }
 
 static inline size_t spi_context_total_tx_len(struct spi_context *ctx);
@@ -262,10 +266,12 @@ static inline void spi_context_unlock_unconditionally(struct spi_context *ctx)
 	/* Forcing CS to go to inactive status */
 	_spi_context_cs_control(ctx, false, true);
 
+#ifdef CONFIG_MULTITHREADING
 	if (!k_sem_count_get(&ctx->lock)) {
 		ctx->owner = NULL;
 		k_sem_give(&ctx->lock);
 	}
+#endif /*CONFIG_MULTITHREADING*/
 }
 
 static inline void *spi_context_get_next_buf(const struct spi_buf **current,
