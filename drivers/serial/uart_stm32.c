@@ -6,6 +6,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "zephyr/sys/util.h"
+#include <sys/_stdint.h>
 #define DT_DRV_COMPAT st_stm32_uart
 
 /**
@@ -135,28 +137,8 @@ static bool uart_stm32_stay_awake_enabled(const struct device *dev)
 
 static void uart_stm32_stay_awake_on_rx(const struct device *dev)
 {
-	const struct uart_stm32_config *config = dev->config;
 	struct uart_stm32_data *data = dev->data;
-
-	if (!uart_stm32_stay_awake_enabled(dev)) {
-		return;
-	}
-	
-	switch (k_work_delayable_busy_get(&data->stay_awake_work)) {
-		case 0: // Work not started, pm state lock not applied
-			pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
-			break;
-		case K_WORK_DELAYED: // pm_policy_state_lock_get already ran, just rest the work delay
-			break;
-		default:
-			return;
-	}
-
-	int rc = k_work_reschedule(&data->stay_awake_work, K_MSEC(config->stay_awake_time_ms));
-	if (rc < 0) {
-		LOG_ERR("Err while scheduling work");
-		return;
-	}
+	data->last_rx_time = k_uptime_get_32();
 }
 
 static void rx_fall_callback_handler(const struct device *port,
@@ -181,6 +163,16 @@ static void rx_fall_callback_handler(const struct device *port,
 }
 
 static void uart_stm32_stay_awake_work_handler(struct k_work *work) {
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct uart_stm32_data *data = CONTAINER_OF(dwork, struct uart_stm32_data, stay_awake_work);
+	const struct device *dev = data->dev;
+	const struct uart_stm32_config *config = dev->config;
+
+	uint32_t diff = k_uptime_get_32() - data->last_rx_time;
+	if ( diff < config->stay_awake_time_ms) {
+		k_work_reschedule(dwork, K_MSEC(config->stay_awake_time_ms - diff));
+		return;
+	}
 	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 	LOG_DBG("Disabling stay awake mode");
 }
@@ -203,6 +195,7 @@ static int uart_stm32_stay_awake_init(const struct device *dev)
 		return err;
 	}
 	k_work_init_delayable(&data->stay_awake_work, uart_stm32_stay_awake_work_handler);
+	data->last_rx_time = k_uptime_get_32();
 	return 0;
 }
 
@@ -1394,18 +1387,18 @@ static void uart_stm32_isr(const struct device *dev)
 	}
 #endif
 
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+	if (data->user_cb) {
+		data->user_cb(dev, data->user_data);
+	}
+#endif /* CONFIG_UART_INTERRUPT_DRIVEN */
+
 #ifdef CONFIG_UART_STAY_AWAKE
 	if (LL_USART_IsEnabledIT_RXNE(config->usart) &&
 			LL_USART_IsActiveFlag_RXNE(config->usart)) {
 		uart_stm32_stay_awake_on_rx(dev);
 	}
 #endif
-
-#ifdef CONFIG_UART_INTERRUPT_DRIVEN
-	if (data->user_cb) {
-		data->user_cb(dev, data->user_data);
-	}
-#endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
 #ifdef CONFIG_UART_ASYNC_API
 	if (LL_USART_IsEnabledIT_IDLE(usart) &&
