@@ -135,28 +135,8 @@ static bool uart_stm32_stay_awake_enabled(const struct device *dev)
 
 static void uart_stm32_stay_awake_on_rx(const struct device *dev)
 {
-	const struct uart_stm32_config *config = dev->config;
 	struct uart_stm32_data *data = dev->data;
-
-	if (!uart_stm32_stay_awake_enabled(dev)) {
-		return;
-	}
-	
-	switch (k_work_delayable_busy_get(&data->stay_awake_work)) {
-		case 0: // Work not started, pm state lock not applied
-			pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
-			break;
-		case K_WORK_DELAYED: // pm_policy_state_lock_get already ran, just rest the work delay
-			break;
-		default:
-			return;
-	}
-
-	int rc = k_work_reschedule(&data->stay_awake_work, K_MSEC(config->stay_awake_time_ms));
-	if (rc < 0) {
-		LOG_ERR("Err while scheduling work");
-		return;
-	}
+	data->has_rx = true;
 }
 
 static void rx_fall_callback_handler(const struct device *port,
@@ -181,6 +161,16 @@ static void rx_fall_callback_handler(const struct device *port,
 }
 
 static void uart_stm32_stay_awake_work_handler(struct k_work *work) {
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct uart_stm32_data *data = CONTAINER_OF(dwork, struct uart_stm32_data, stay_awake_work);
+	const struct device *dev = data->dev;
+	const struct uart_stm32_config *config = dev->config;
+
+	if ( data->has_rx ) {
+		data->has_rx = false;
+		k_work_reschedule(dwork, K_MSEC(config->stay_awake_time_ms));
+		return;
+	}
 	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 	LOG_DBG("Disabling stay awake mode");
 }
@@ -203,6 +193,7 @@ static int uart_stm32_stay_awake_init(const struct device *dev)
 		return err;
 	}
 	k_work_init_delayable(&data->stay_awake_work, uart_stm32_stay_awake_work_handler);
+	data->has_rx = false;
 	return 0;
 }
 
@@ -1394,57 +1385,59 @@ static void uart_stm32_isr(const struct device *dev)
 	}
 #endif
 
-#ifdef CONFIG_UART_STAY_AWAKE
-	if (LL_USART_IsEnabledIT_RXNE(config->usart) &&
-			LL_USART_IsActiveFlag_RXNE(config->usart)) {
-		uart_stm32_stay_awake_on_rx(dev);
-	}
-#endif
-
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	if (data->user_cb) {
 		data->user_cb(dev, data->user_data);
 	}
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
-#ifdef CONFIG_UART_ASYNC_API
-	if (LL_USART_IsEnabledIT_IDLE(usart) &&
-			LL_USART_IsActiveFlag_IDLE(usart)) {
-
-		LL_USART_ClearFlag_IDLE(usart);
-
-		LOG_DBG("idle interrupt occurred");
-
-		if (data->dma_rx.timeout == 0) {
-			uart_stm32_dma_rx_flush(dev);
-		} else {
-			/* Start the RX timer not null */
-			async_timer_start(&data->dma_rx.timeout_work,
-								data->dma_rx.timeout);
-		}
-	} else if (LL_USART_IsEnabledIT_TC(usart) &&
-			LL_USART_IsActiveFlag_TC(usart)) {
-
-		LL_USART_DisableIT_TC(usart);
-		/* Generate TX_DONE event when transmission is done */
-		async_evt_tx_done(data);
-
-#ifdef CONFIG_PM
-		uart_stm32_pm_policy_state_lock_put(dev);
-#endif
-	} else if (LL_USART_IsEnabledIT_RXNE(usart) &&
+#ifdef CONFIG_UART_STAY_AWAKE
+	if (LL_USART_IsEnabledIT_RXNE(usart) &&
 			LL_USART_IsActiveFlag_RXNE(usart)) {
-#ifdef USART_SR_RXNE
-		/* clear the RXNE flag, because Rx data was not read */
-		LL_USART_ClearFlag_RXNE(usart);
-#else
-		/* clear the RXNE by flushing the fifo, because Rx data was not read */
-		LL_USART_RequestRxDataFlush(usart);
-#endif /* USART_SR_RXNE */
+		uart_stm32_stay_awake_on_rx(dev);
 	}
+#endif
 
-	/* Clear errors */
-	uart_stm32_err_check(dev);
+#ifdef CONFIG_UART_ASYNC_API
+	if (LL_USART_IsEnabledDMAReq_RX(usart) || LL_USART_IsEnabledDMAReq_RX(usart)) {
+		if (LL_USART_IsEnabledIT_IDLE(usart) &&
+				LL_USART_IsActiveFlag_IDLE(usart)) {
+
+			LL_USART_ClearFlag_IDLE(usart);
+
+			LOG_DBG("idle interrupt occurred");
+
+			if (data->dma_rx.timeout == 0) {
+				uart_stm32_dma_rx_flush(dev);
+			} else {
+				/* Start the RX timer not null */
+				async_timer_start(&data->dma_rx.timeout_work,
+									data->dma_rx.timeout);
+			}
+		} else if (LL_USART_IsEnabledIT_TC(usart) &&
+				LL_USART_IsActiveFlag_TC(usart)) {
+
+			LL_USART_DisableIT_TC(usart);
+			/* Generate TX_DONE event when transmission is done */
+			async_evt_tx_done(data);
+
+	#ifdef CONFIG_PM
+			uart_stm32_pm_policy_state_lock_put(dev);
+	#endif
+		} else if (LL_USART_IsEnabledIT_RXNE(usart) &&
+				LL_USART_IsActiveFlag_RXNE(usart)) {
+	#ifdef USART_SR_RXNE
+			/* clear the RXNE flag, because Rx data was not read */
+			LL_USART_ClearFlag_RXNE(usart);
+	#else
+			/* clear the RXNE by flushing the fifo, because Rx data was not read */
+			LL_USART_RequestRxDataFlush(usart);
+	#endif /* USART_SR_RXNE */
+		}
+
+		/* Clear errors */
+		uart_stm32_err_check(dev);
+	}
 #endif /* CONFIG_UART_ASYNC_API */
 
 #if defined(CONFIG_PM) && defined(IS_UART_WAKEUP_FROMSTOP_INSTANCE) \
@@ -2270,20 +2263,6 @@ static int uart_stm32_init(const struct device *dev)
 	config->irq_config_func(dev);
 #endif /* CONFIG_PM || CONFIG_UART_INTERRUPT_DRIVEN || CONFIG_UART_ASYNC_API */
 
-#if defined(CONFIG_PM) && defined(IS_UART_WAKEUP_FROMSTOP_INSTANCE)
-	if (config->wakeup_source) {
-		/* Enable ability to wakeup device in Stop mode
-		 * Effect depends on CONFIG_PM_DEVICE status:
-		 * CONFIG_PM_DEVICE=n : Always active
-		 * CONFIG_PM_DEVICE=y : Controlled by pm_device_wakeup_enable()
-		 */
-		LL_USART_EnableInStopMode(config->usart);
-		if (config->wakeup_line != STM32_EXTI_LINE_NONE) {
-			/* Prepare the WAKEUP with the expected EXTI line */
-			LL_EXTI_EnableIT_0_31(BIT(config->wakeup_line));
-		}
-	}
-#endif /* CONFIG_PM */
 
 #ifdef CONFIG_UART_STAY_AWAKE
 	err = uart_stm32_stay_awake_init(dev);
