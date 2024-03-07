@@ -21,9 +21,8 @@
 #include <zephyr/pm/device_runtime.h>
 #include "i2c_ll_stm32.h"
 
-#define LOG_LEVEL CONFIG_I2C_LOG_LEVEL
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(i2c_ll_stm32_v2);
+LOG_MODULE_REGISTER(i2c_ll_stm32_v2 , CONFIG_I2C_LOG_LEVEL);
 
 #include "i2c-priv.h"
 
