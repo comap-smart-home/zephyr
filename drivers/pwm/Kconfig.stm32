@@ -14,3 +14,10 @@ config PWM_STM32
 	  This option enables the PWM driver for STM32 family of
 	  processors. Say y if you wish to use PWM port on STM32
 	  MCU.
+
+config PWM_STM32_EX
+	bool "STM32 MCU PWM driver"
+	default n
+	depends on PWM_STM32
+	help
+	  This option enables extended API for STM32 PWM.

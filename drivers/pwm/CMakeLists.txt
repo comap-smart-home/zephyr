@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 zephyr_syscall_header(${ZEPHYR_BASE}/include/zephyr/drivers/pwm.h)
+zephyr_syscall_header_ifdef(CONFIG_PWM_STM32_EX		${ZEPHYR_BASE}/include/zephyr/drivers/pwm/pwm_stm32_ex.h)
 
 zephyr_library()
 
