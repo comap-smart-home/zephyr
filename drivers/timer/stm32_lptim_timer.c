@@ -295,8 +295,6 @@ void sys_clock_set_timeout(int32_t ticks, bool idle)
 	else if (next_arr < (lp_time + LPTIM_GUARD_VALUE)) {
 		next_arr = lp_time + LPTIM_GUARD_VALUE;
 	}
-	/* with slow lptim_clock_freq, LPTIM_GUARD_VALUE of 1 is enough */
-	next_arr = next_arr - 1;
 
 	/* Update autoreload register */
 	lptim_set_autoreload(next_arr);
