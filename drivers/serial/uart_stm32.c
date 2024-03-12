@@ -6,8 +6,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "zephyr/sys/util.h"
-#include <sys/_stdint.h>
 #define DT_DRV_COMPAT st_stm32_uart
 
 /**
