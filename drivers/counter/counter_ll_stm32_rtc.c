@@ -301,6 +301,12 @@ tick_t rtc_stm32_read(const struct device *dev)
 
 	ARG_UNUSED(dev);
 
+	/* Enable Backup access */
+#if defined(PWR_CR_DBP) || defined(PWR_CR1_DBP) || \
+	defined(PWR_DBPCR_DBP) || defined(PWR_DBPR_DBP)
+	LL_PWR_EnableBkUpAccess();
+#endif /* PWR_CR_DBP || PWR_CR1_DBP || PWR_DBPR_DBP */
+
 	rtc_time = LL_RTC_TIME_Get(RTC);
 
 	ticks = rtc_time;
