@@ -69,7 +69,7 @@ static uint32_t lptim_clock_freq = CONFIG_STM32_LPTIM_CLOCK;
 static uint32_t lptim_clock_presc = DT_PROP(DT_DRV_INST(0), st_prescaler);
 
 /* Minimum nb of clock cycles to have to set autoreload register correctly */
-#define LPTIM_GUARD_VALUE 2
+#define LPTIM_GUARD_VALUE 1
 
 /* A 32bit value cannot exceed 0xFFFFFFFF/LPTIM_TIMEBASE counting cycles.
  * This is for example about of 65000 x 2000ms when clocked by LSI
