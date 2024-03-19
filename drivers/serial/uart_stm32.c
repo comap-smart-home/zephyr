@@ -1436,6 +1436,7 @@ static void uart_stm32_isr(const struct device *dev)
 
 	/* Clear errors */
 	uart_stm32_err_check(dev);
+	}
 #endif /* CONFIG_UART_ASYNC_API */
 
 #if defined(CONFIG_PM) && defined(IS_UART_WAKEUP_FROMSTOP_INSTANCE) \
