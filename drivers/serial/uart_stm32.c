@@ -136,7 +136,7 @@ static bool uart_stm32_stay_awake_enabled(const struct device *dev)
 static void uart_stm32_stay_awake_on_rx(const struct device *dev)
 {
 	struct uart_stm32_data *data = dev->data;
-	data->last_rx_time = k_uptime_get_32();
+	data->has_rx = true;
 }
 
 static void rx_fall_callback_handler(const struct device *port,
@@ -166,9 +166,9 @@ static void uart_stm32_stay_awake_work_handler(struct k_work *work) {
 	const struct device *dev = data->dev;
 	const struct uart_stm32_config *config = dev->config;
 
-	uint32_t diff = k_uptime_get_32() - data->last_rx_time;
-	if ( diff < config->stay_awake_time_ms) {
-		k_work_reschedule(dwork, K_MSEC(config->stay_awake_time_ms - diff));
+	if ( data->has_rx ) {
+		data->has_rx = false;
+		k_work_reschedule(dwork, K_MSEC(config->stay_awake_time_ms));
 		return;
 	}
 	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
@@ -193,7 +193,7 @@ static int uart_stm32_stay_awake_init(const struct device *dev)
 		return err;
 	}
 	k_work_init_delayable(&data->stay_awake_work, uart_stm32_stay_awake_work_handler);
-	data->last_rx_time = k_uptime_get_32();
+	data->has_rx = false;
 	return 0;
 }
 
@@ -1413,7 +1413,7 @@ static void uart_stm32_isr(const struct device *dev)
 			async_timer_start(&data->dma_rx.timeout_work,
 								data->dma_rx.timeout);
 		}
-	} else if (LL_USART_IsEnabledIT_TC(usart) &&
+	}  else if (LL_USART_IsEnabledIT_TC(usart) &&
 			LL_USART_IsActiveFlag_TC(usart)) {
 
 		LL_USART_DisableIT_TC(usart);
@@ -1436,7 +1436,6 @@ static void uart_stm32_isr(const struct device *dev)
 
 	/* Clear errors */
 	uart_stm32_err_check(dev);
-	}
 #endif /* CONFIG_UART_ASYNC_API */
 
 #if defined(CONFIG_PM) && defined(IS_UART_WAKEUP_FROMSTOP_INSTANCE) \

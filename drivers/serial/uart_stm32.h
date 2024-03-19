@@ -120,7 +120,7 @@ struct uart_stm32_data {
 	const struct device *dev;
 	struct gpio_callback rx_fall_handler;
 	struct k_work_delayable stay_awake_work;
-	uint32_t last_rx_time;
+	bool has_rx;
 #endif
 #ifdef CONFIG_PM
 	bool tx_poll_stream_on;
