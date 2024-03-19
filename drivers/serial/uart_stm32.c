@@ -129,7 +129,7 @@ static bool uart_stm32_stay_awake_enabled(const struct device *dev)
 static void uart_stm32_stay_awake_on_rx(const struct device *dev)
 {
 	struct uart_stm32_data *data = dev->data;
-	data->last_rx_time = k_uptime_get_32();
+	data->has_rx = true;
 }
 
 static void rx_fall_callback_handler(const struct device *port,
@@ -159,9 +159,9 @@ static void uart_stm32_stay_awake_work_handler(struct k_work *work) {
 	const struct device *dev = data->dev;
 	const struct uart_stm32_config *config = dev->config;
 
-	uint32_t diff = k_uptime_get_32() - data->last_rx_time;
-	if ( diff < config->stay_awake_time_ms) {
-		k_work_reschedule(dwork, K_MSEC(config->stay_awake_time_ms - diff));
+	if ( data->has_rx ) {
+		data->has_rx = false;
+		k_work_reschedule(dwork, K_MSEC(config->stay_awake_time_ms));
 		return;
 	}
 	pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
@@ -186,7 +186,7 @@ static int uart_stm32_stay_awake_init(const struct device *dev)
 		return err;
 	}
 	k_work_init_delayable(&data->stay_awake_work, uart_stm32_stay_awake_work_handler);
-	data->last_rx_time = k_uptime_get_32();
+	data->has_rx = false;
 	return 0;
 }
 
@@ -1382,43 +1382,43 @@ static void uart_stm32_isr(const struct device *dev)
 
 #ifdef CONFIG_UART_ASYNC_API
 	if (LL_USART_IsEnabledDMAReq_RX(config->usart) || LL_USART_IsEnabledDMAReq_RX(config->usart)) {
-	if (LL_USART_IsEnabledIT_IDLE(config->usart) &&
-			LL_USART_IsActiveFlag_IDLE(config->usart)) {
+		if (LL_USART_IsEnabledIT_IDLE(config->usart) &&
+				LL_USART_IsActiveFlag_IDLE(config->usart)) {
 
-		LL_USART_ClearFlag_IDLE(config->usart);
+			LL_USART_ClearFlag_IDLE(config->usart);
 
-		LOG_DBG("idle interrupt occurred");
+			LOG_DBG("idle interrupt occurred");
 
-		if (data->dma_rx.timeout == 0) {
-			uart_stm32_dma_rx_flush(dev);
-		} else {
-			/* Start the RX timer not null */
-			async_timer_start(&data->dma_rx.timeout_work,
-								data->dma_rx.timeout);
+			if (data->dma_rx.timeout == 0) {
+				uart_stm32_dma_rx_flush(dev);
+			} else {
+				/* Start the RX timer not null */
+				async_timer_start(&data->dma_rx.timeout_work,
+									data->dma_rx.timeout);
+			}
+		} else if (LL_USART_IsEnabledIT_TC(config->usart) &&
+				LL_USART_IsActiveFlag_TC(config->usart)) {
+
+			LL_USART_DisableIT_TC(config->usart);
+			/* Generate TX_DONE event when transmission is done */
+			async_evt_tx_done(data);
+
+	#ifdef CONFIG_PM
+			uart_stm32_pm_policy_state_lock_put(dev);
+	#endif
+		} else if (LL_USART_IsEnabledIT_RXNE(config->usart) &&
+				LL_USART_IsActiveFlag_RXNE(config->usart)) {
+	#ifdef USART_SR_RXNE
+			/* clear the RXNE flag, because Rx data was not read */
+			LL_USART_ClearFlag_RXNE(config->usart);
+	#else
+			/* clear the RXNE by flushing the fifo, because Rx data was not read */
+			LL_USART_RequestRxDataFlush(config->usart);
+	#endif /* USART_SR_RXNE */
 		}
-	} else if (LL_USART_IsEnabledIT_TC(config->usart) &&
-			LL_USART_IsActiveFlag_TC(config->usart)) {
 
-		LL_USART_DisableIT_TC(config->usart);
-		/* Generate TX_DONE event when transmission is done */
-		async_evt_tx_done(data);
-
-#ifdef CONFIG_PM
-		uart_stm32_pm_policy_state_lock_put(dev);
-#endif
-	} else if (LL_USART_IsEnabledIT_RXNE(config->usart) &&
-			LL_USART_IsActiveFlag_RXNE(config->usart)) {
-#ifdef USART_SR_RXNE
-		/* clear the RXNE flag, because Rx data was not read */
-		LL_USART_ClearFlag_RXNE(config->usart);
-#else
-		/* clear the RXNE by flushing the fifo, because Rx data was not read */
-		LL_USART_RequestRxDataFlush(config->usart);
-#endif /* USART_SR_RXNE */
-	}
-
-	/* Clear errors */
-	uart_stm32_err_check(dev);
+		/* Clear errors */
+		uart_stm32_err_check(dev);
 	}
 #endif /* CONFIG_UART_ASYNC_API */
 
