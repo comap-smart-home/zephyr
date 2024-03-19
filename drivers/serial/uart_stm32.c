@@ -1381,6 +1381,7 @@ static void uart_stm32_isr(const struct device *dev)
 #endif
 
 #ifdef CONFIG_UART_ASYNC_API
+	if (LL_USART_IsEnabledDMAReq_RX(config->usart) || LL_USART_IsEnabledDMAReq_RX(config->usart)) {
 	if (LL_USART_IsEnabledIT_IDLE(config->usart) &&
 			LL_USART_IsActiveFlag_IDLE(config->usart)) {
 
@@ -1418,6 +1419,7 @@ static void uart_stm32_isr(const struct device *dev)
 
 	/* Clear errors */
 	uart_stm32_err_check(dev);
+	}
 #endif /* CONFIG_UART_ASYNC_API */
 
 #if defined(CONFIG_PM) && defined(IS_UART_WAKEUP_FROMSTOP_INSTANCE) \
