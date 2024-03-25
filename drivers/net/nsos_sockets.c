@@ -367,7 +367,7 @@ static int nsos_ioctl(void *obj, unsigned int request, va_list args)
 	return -EINVAL;
 }
 
-static int sockaddr_to_nsos_mid(const struct sockaddr *addr, socklen_t *addrlen,
+static int sockaddr_to_nsos_mid(const struct sockaddr *addr, const socklen_t *addrlen,
 				struct nsos_mid_sockaddr **addr_mid, size_t *addrlen_mid)
 {
 	if (!addr || !addrlen) {
@@ -664,11 +664,37 @@ return_ret:
 
 	return ret;
 }
-
+   
 static ssize_t nsos_sendmsg(void *obj, const struct msghdr *msg, int flags)
 {
-	errno = ENOTSUP;
-	return -1;
+    struct nsos_socket *sock = obj;
+    int ret;
+
+    // Check if ancillary data is present, which is not supported in this implementation
+    if (msg->msg_controllen != 0) {
+        errno = EINVAL; // Ancillary data not supported
+        return -1;
+    }
+
+    // Convert the destination address to NSOS format
+    struct nsos_mid_sockaddr_storage addr_storage_mid;
+    struct nsos_mid_sockaddr *addr_mid = (struct nsos_mid_sockaddr *)&addr_storage_mid;
+    size_t addrlen_mid = sizeof(addr_storage_mid);
+	ret = nsos_adapt_getsockname(sock->pollfd.fd, addr_mid, &addrlen_mid);
+    if (ret < 0) {
+        errno = errno_from_nsos_mid(-ret);
+        return -1;
+    }
+
+    // Send the message
+    ret = nsos_adapt_sendmsg(sock->pollfd.fd, msg->msg_iov->iov_base, msg->msg_iov->iov_len, flags,
+                              addr_mid, addrlen_mid, NULL, 0);
+    if (ret < 0) {
+        errno = errno_from_nsos_mid(-ret);
+        return -1;
+    }
+
+    return ret;
 }
 
 static int nsos_recvfrom_with_poll(struct nsos_socket *sock, void *buf, size_t len, int flags,

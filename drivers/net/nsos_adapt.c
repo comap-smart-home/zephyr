@@ -42,8 +42,7 @@ static int nsos_adapt_nfds;
 #endif
 
 #ifndef CONTAINER_OF
-#define CONTAINER_OF(ptr, type, field)                               \
-		((type *)(((char *)(ptr)) - offsetof(type, field)))
+#define CONTAINER_OF(ptr, type, field) ((type *)(((char *)(ptr)) - offsetof(type, field)))
 #endif
 
 int nsos_adapt_get_errno(void)
@@ -205,14 +204,10 @@ static int socket_flags_from_nsos_mid(int flags_mid)
 {
 	int flags = 0;
 
-	nsos_socket_flag_convert(&flags_mid, NSOS_MID_MSG_PEEK,
-				 &flags, MSG_PEEK);
-	nsos_socket_flag_convert(&flags_mid, NSOS_MID_MSG_TRUNC,
-				 &flags, MSG_TRUNC);
-	nsos_socket_flag_convert(&flags_mid, NSOS_MID_MSG_DONTWAIT,
-				 &flags, MSG_DONTWAIT);
-	nsos_socket_flag_convert(&flags_mid, NSOS_MID_MSG_WAITALL,
-				 &flags, MSG_WAITALL);
+	nsos_socket_flag_convert(&flags_mid, NSOS_MID_MSG_PEEK, &flags, MSG_PEEK);
+	nsos_socket_flag_convert(&flags_mid, NSOS_MID_MSG_TRUNC, &flags, MSG_TRUNC);
+	nsos_socket_flag_convert(&flags_mid, NSOS_MID_MSG_DONTWAIT, &flags, MSG_DONTWAIT);
+	nsos_socket_flag_convert(&flags_mid, NSOS_MID_MSG_WAITALL, &flags, MSG_WAITALL);
 
 	if (flags_mid != 0) {
 		return -NSOS_MID_EINVAL;
@@ -307,8 +302,7 @@ static int sockaddr_to_nsos_mid(const struct sockaddr *addr, socklen_t addrlen,
 
 	switch (addr->sa_family) {
 	case AF_INET: {
-		struct nsos_mid_sockaddr_in *addr_in_mid =
-			(struct nsos_mid_sockaddr_in *)addr_mid;
+		struct nsos_mid_sockaddr_in *addr_in_mid = (struct nsos_mid_sockaddr_in *)addr_mid;
 		const struct sockaddr_in *addr_in = (const struct sockaddr_in *)addr;
 
 		if (addr_in_mid) {
@@ -347,6 +341,30 @@ static int sockaddr_to_nsos_mid(const struct sockaddr *addr, socklen_t addrlen,
 	nsi_print_warning("%s: socket family %d not supported\n", __func__, addr->sa_family);
 
 	return -NSOS_MID_EINVAL;
+}
+
+int nsos_adapt_getsockname(int fd, struct nsos_mid_sockaddr *addr_mid, size_t *addrlen_mid)
+{
+	struct sockaddr_storage addr_storage;
+	struct sockaddr *addr = (struct sockaddr *)&addr_storage;
+	socklen_t addrlen = sizeof(addr_storage);
+	int ret;
+
+	// Call getsockname to retrieve the socket's local address
+	ret = getsockname(fd, addr, &addrlen);
+	if (ret < 0) {
+		// Error handling for getsockname failure
+		return -errno_to_nsos_mid(errno);
+	}
+
+	// Convert the retrieved sockaddr to nsos_mid_sockaddr
+	ret = sockaddr_to_nsos_mid(addr, addrlen, addr_mid, addrlen_mid);
+	if (ret < 0) {
+		// Error handling for sockaddr_to_nsos_mid failure
+		return ret;
+	}
+
+	return 0;
 }
 
 int nsos_adapt_bind(int fd, const struct nsos_mid_sockaddr *addr_mid, size_t addrlen_mid)
@@ -435,9 +453,39 @@ int nsos_adapt_sendto(int fd, const void *buf, size_t len, int flags,
 		return ret;
 	}
 
-	ret = sendto(fd, buf, len,
-		     socket_flags_from_nsos_mid(flags) | MSG_NOSIGNAL,
-		     addr, addrlen);
+	ret = sendto(fd, buf, len, socket_flags_from_nsos_mid(flags) | MSG_NOSIGNAL, addr, addrlen);
+	if (ret < 0) {
+		return -errno_to_nsos_mid(errno);
+	}
+
+	return ret;
+}
+
+int nsos_adapt_sendmsg(int fd, const void *buf, size_t len, int flags,
+		       const struct nsos_mid_sockaddr *addr_mid, size_t addrlen_mid,
+		       const struct nsos_mid_msghdr *msg_control, size_t msg_controllen)
+{
+	struct sockaddr_storage addr_storage;
+	struct sockaddr *addr = (struct sockaddr *)&addr_storage;
+	socklen_t addrlen;
+	int ret;
+
+	ret = sockaddr_from_nsos_mid(&addr, &addrlen, addr_mid, addrlen_mid);
+	if (ret < 0) {
+		return ret;
+	}
+
+	struct msghdr msg;
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_name = addr;
+	msg.msg_namelen = addrlen;
+	msg.msg_iov = (struct iovec *)buf;
+	msg.msg_iovlen = len;
+	msg.msg_control = (void *)msg_control;
+	msg.msg_controllen = msg_controllen;
+	msg.msg_flags = flags;
+
+	ret = sendmsg(fd, &msg, socket_flags_from_nsos_mid(flags) | MSG_NOSIGNAL);
 	if (ret < 0) {
 		return -errno_to_nsos_mid(errno);
 	}
@@ -454,8 +502,7 @@ int nsos_adapt_recvfrom(int fd, void *buf, size_t len, int flags,
 	int ret;
 	int err;
 
-	ret = recvfrom(fd, buf, len, socket_flags_from_nsos_mid(flags),
-		       addr, &addrlen);
+	ret = recvfrom(fd, buf, len, socket_flags_from_nsos_mid(flags), addr, &addrlen);
 	if (ret < 0) {
 		return -errno_to_nsos_mid(errno);
 	}
@@ -468,10 +515,10 @@ int nsos_adapt_recvfrom(int fd, void *buf, size_t len, int flags,
 	return ret;
 }
 
-#define MAP_POLL_EPOLL(_event_from, _event_to)	\
-	if (events_from & (_event_from)) {	\
-		events_from &= ~(_event_from);	\
-		events_to |= _event_to;		\
+#define MAP_POLL_EPOLL(_event_from, _event_to)                                                     \
+	if (events_from & (_event_from)) {                                                         \
+		events_from &= ~(_event_from);                                                     \
+		events_to |= _event_to;                                                            \
 	}
 
 static int nsos_poll_to_epoll_events(int events_from)
@@ -539,8 +586,7 @@ struct nsos_addrinfo_wrap {
 	struct addrinfo *addrinfo;
 };
 
-static int addrinfo_to_nsos_mid(struct addrinfo *res,
-				struct nsos_mid_addrinfo **mid_res)
+static int addrinfo_to_nsos_mid(struct addrinfo *res, struct nsos_mid_addrinfo **mid_res)
 {
 	struct nsos_addrinfo_wrap *nsos_res_wraps;
 	size_t idx_res = 0;
@@ -582,8 +628,7 @@ static int addrinfo_to_nsos_mid(struct addrinfo *res,
 			goto free_wraps;
 		}
 
-		wrap->addrinfo_mid.ai_addr =
-			(struct nsos_mid_sockaddr *)&wrap->addr_storage;
+		wrap->addrinfo_mid.ai_addr = (struct nsos_mid_sockaddr *)&wrap->addr_storage;
 		wrap->addrinfo_mid.ai_addrlen = sizeof(wrap->addr_storage);
 
 		ret = sockaddr_to_nsos_mid(res_p->ai_addr, res_p->ai_addrlen,
@@ -605,8 +650,7 @@ static int addrinfo_to_nsos_mid(struct addrinfo *res,
 	return 0;
 
 free_wraps:
-	for (struct nsos_mid_addrinfo *res_p = &nsos_res_wraps[0].addrinfo_mid;
-	     res_p;
+	for (struct nsos_mid_addrinfo *res_p = &nsos_res_wraps[0].addrinfo_mid; res_p;
 	     res_p = res_p->ai_next) {
 		free(res_p->ai_canonname);
 	}
@@ -618,8 +662,7 @@ free_wraps:
 
 int nsos_adapt_getaddrinfo(const char *node, const char *service,
 			   const struct nsos_mid_addrinfo *hints_mid,
-			   struct nsos_mid_addrinfo **res_mid,
-			   int *system_errno)
+			   struct nsos_mid_addrinfo **res_mid, int *system_errno)
 {
 	struct addrinfo hints;
 	struct addrinfo *res = NULL;
@@ -647,9 +690,7 @@ int nsos_adapt_getaddrinfo(const char *node, const char *service,
 		}
 	}
 
-	ret = getaddrinfo(node, service,
-			  hints_mid ? &hints : NULL,
-			  &res);
+	ret = getaddrinfo(node, service, hints_mid ? &hints : NULL, &res);
 	if (ret < 0) {
 		return ret;
 	}

@@ -89,6 +89,16 @@ struct nsos_mid_addrinfo {
 	struct nsos_mid_addrinfo *ai_next;
 };
 
+struct nsos_mid_msghdr {
+    struct nsos_mid_sockaddr *msg_name;
+    size_t msg_namelen;       
+    struct nsos_mid_iovec *msg_iov;           
+    int msg_iovlen;                          
+    void *msg_control;                        
+    size_t msg_controllen;                    
+    int msg_flags;                            
+};
+
 static inline void nsos_socket_flag_convert(int *flags_a, int flag_a,
 					    int *flags_b, int flag_b)
 {
@@ -102,12 +112,16 @@ int nsos_adapt_get_errno(void);
 
 int nsos_adapt_socket(int family, int type, int proto);
 
+int nsos_adapt_getsockname(int fd, struct nsos_mid_sockaddr *addr_mid, size_t *addrlen_mid);
 int nsos_adapt_bind(int fd, const struct nsos_mid_sockaddr *addr, size_t addrlen);
 int nsos_adapt_connect(int fd, const struct nsos_mid_sockaddr *addr, size_t addrlen);
 int nsos_adapt_listen(int fd, int backlog);
 int nsos_adapt_accept(int fd, struct nsos_mid_sockaddr *addr, size_t *addrlen);
 int nsos_adapt_sendto(int fd, const void *buf, size_t len, int flags,
 		      const struct nsos_mid_sockaddr *addr, size_t addrlen);
+int nsos_adapt_sendmsg(int fd, const void *buf, size_t len, int flags,
+                        const struct nsos_mid_sockaddr *addr_mid, size_t addrlen_mid,
+                        const struct nsos_mid_msghdr *msg_control, size_t msg_controllen);
 int nsos_adapt_recvfrom(int fd, void *buf, size_t len, int flags,
 			struct nsos_mid_sockaddr *addr, size_t *addrlen);
 
