@@ -68,7 +68,10 @@ static uint32_t lptim_clock_freq = CONFIG_STM32_LPTIM_CLOCK;
 /* The prescaler given by the DTS and to apply to the lptim_clock_freq */
 static uint32_t lptim_clock_presc = DT_PROP(DT_DRV_INST(0), st_prescaler);
 
-/* Minimum nb of clock cycles to have to set autoreload register correctly */
+/* Minimum nb of clock cycles to have to set autoreload register correctly 
+ * The AN4865 specify the write delay of the arr:
+ * - 2 × APB_CLK + 3 × LPTIM_CLK + 2 × APB_CLK
+ */
 #define LPTIM_GUARD_VALUE 1
 
 /* A 32bit value cannot exceed 0xFFFFFFFF/LPTIM_TIMEBASE counting cycles.
@@ -152,7 +155,6 @@ static void lptim_irq_handler(const struct device *unused)
 				* CONFIG_SYS_CLOCK_TICKS_PER_SEC)
 				/ lptim_clock_freq;
 
-		autoreload_ready = false;
 		sys_clock_announce(IS_ENABLED(CONFIG_TICKLESS_KERNEL)
 				? dticks : (dticks > 0));
 	}
