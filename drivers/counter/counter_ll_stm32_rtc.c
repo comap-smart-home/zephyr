@@ -240,6 +240,12 @@ tick_t rtc_stm32_read(const struct device *dev)
 #endif /* CONFIG_COUNTER_RTC_STM32_SUBSECONDS */
 	ARG_UNUSED(dev);
 
+	/* Enable Backup access */
+#if defined(PWR_CR_DBP) || defined(PWR_CR1_DBP) || \
+	defined(PWR_DBPCR_DBP) || defined(PWR_DBPR_DBP)
+	LL_PWR_EnableBkUpAccess();
+#endif /* PWR_CR_DBP || PWR_CR1_DBP || PWR_DBPR_DBP */
+
 	/* Read time and date registers. Make sure value of the previous register
 	 * hasn't been changed while reading the next one.
 	 */
