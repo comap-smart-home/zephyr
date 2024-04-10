@@ -256,6 +256,10 @@ void sys_clock_set_timeout(int32_t ticks, bool idle)
 		counter_get_value(idle_timer, &idle_timer_pre_idle);
 		cycle_pre_idle = cycle_count + elapsed();
 
+#if defined(CONFIG_DEBUG) && defined(CONFIG_SOC_SERIES_STM32WLX)
+		/* Errata es0506 2.2.9 SysTick trigger in debug emulation generates HardFault */
+		SysTick->CTRL &= ~SysTick_CTRL_ENABLE_Msk;
+#endif
 		return;
 	}
 #endif /* CONFIG_CORTEX_M_SYSTICK_IDLE_TIMER */
@@ -369,6 +373,11 @@ void sys_clock_idle_exit(void)
 		cycle_t systick_diff, missed_cycles;
 		uint32_t idle_timer_diff, idle_timer_post, dcycles, dticks;
 		uint64_t systick_us, idle_timer_us;
+
+#if defined(CONFIG_DEBUG) && defined(CONFIG_SOC_SERIES_STM32WLX)
+		/* Errata es0506 2.2.9 SysTick trigger in debug emulation generates HardFault */
+		SysTick->CTRL |= SysTick_CTRL_ENABLE_Msk;
+#endif
 
 		/* Get current values for both timers */
 		counter_get_value(idle_timer, &idle_timer_post);
