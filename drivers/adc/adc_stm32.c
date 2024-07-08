@@ -21,6 +21,7 @@
 #include <soc.h>
 #include <zephyr/pm/device.h>
 #include <zephyr/pm/policy.h>
+#include <zephyr/pm/device_runtime.h>
 #include <stm32_ll_adc.h>
 #if defined(CONFIG_SOC_SERIES_STM32U5X)
 #include <stm32_ll_pwr.h>
@@ -1110,6 +1111,7 @@ static void adc_stm32_isr(const struct device *dev)
 				pm_policy_state_lock_put(PM_STATE_SUSPEND_TO_RAM,
 							 PM_ALL_SUBSTATES);
 			}
+			pm_device_runtime_put(dev);
 		}
 	}
 
@@ -1144,14 +1146,20 @@ static int adc_stm32_read(const struct device *dev,
 	struct adc_stm32_data *data = dev->data;
 	int error;
 
-	adc_context_lock(&data->ctx, false, NULL);
+	adc_context_lock(&data->ctx, true, NULL);
+	error = pm_device_runtime_get(dev);
+	if (error < 0) {
+		goto exit;
+	}
 	pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 	if (IS_ENABLED(CONFIG_PM_S2RAM)) {
 		pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_RAM, PM_ALL_SUBSTATES);
 	}
 	error = start_read(dev, sequence);
-	adc_context_release(&data->ctx, error);
+	pm_device_runtime_put(dev);
 
+exit:
+	adc_context_release(&data->ctx, error);
 	return error;
 }
 
@@ -1164,13 +1172,18 @@ static int adc_stm32_read_async(const struct device *dev,
 	int error;
 
 	adc_context_lock(&data->ctx, true, async);
+	error = pm_device_runtime_get(dev);
+	if (error < 0) {
+		goto exit;
+	}
 	pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_IDLE, PM_ALL_SUBSTATES);
 	if (IS_ENABLED(CONFIG_PM_S2RAM)) {
 		pm_policy_state_lock_get(PM_STATE_SUSPEND_TO_RAM, PM_ALL_SUBSTATES);
 	}
 	error = start_read(dev, sequence);
-	adc_context_release(&data->ctx, error);
 
+exit:
+	adc_context_release(&data->ctx, error);
 	return error;
 }
 #endif
@@ -1460,8 +1473,9 @@ static int adc_stm32_init(const struct device *dev)
 
 	adc_context_unlock_unconditionally(&data->ctx);
 
-	return 0;
+	return pm_device_runtime_enable(dev);
 }
+
 
 #ifdef CONFIG_PM_DEVICE
 static int adc_stm32_suspend_setup(const struct device *dev)
