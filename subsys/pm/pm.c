@@ -73,11 +73,11 @@ static void pm_state_notify(uint8_t direction)
 	static sys_slist_t *notifiers;
 	k_spinlock_key_t pm_notifier_key;
 
-	if (z_cpus_pm_state[CURRENT_CPU].state == PM_STATE_ACTIVE) {
+	if (z_cpus_pm_state[_current_cpu->id].state == PM_STATE_ACTIVE) {
 		notifiers = &pm_notifiers_active;
 	} else {
-		int8_t state_idx = pm_state_get_index(z_cpus_pm_state[CURRENT_CPU].state,
-						       z_cpus_pm_state[CURRENT_CPU].substate_id);
+		int8_t state_idx = pm_state_get_index(z_cpus_pm_state[_current_cpu->id].state,
+						       z_cpus_pm_state[_current_cpu->id].substate_id);
 		if (state_idx < 0) {
 			LOG_ERR("Sub/state passed didn't match any enabled system states");
 			return;

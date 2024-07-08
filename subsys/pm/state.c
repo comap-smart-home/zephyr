@@ -88,7 +88,7 @@ int8_t pm_state_get_index(enum pm_state state, uint8_t substate_id)
 	return -1;
 }
 #else
-static inline int8_t pm_state_cpu_get_index(uint8_t cpu, enum pm_state state, uint8_t substate_id)
+int8_t pm_state_cpu_get_index(uint8_t cpu, enum pm_state state, uint8_t substate_id)
 {
 	for (uint8_t i = 0; i < states_per_cpu[cpu]; i++) {
 		if (cpus_states[cpu][i].state == state &&
