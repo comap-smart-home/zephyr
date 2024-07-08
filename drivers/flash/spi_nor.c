@@ -1609,10 +1609,12 @@ static int spi_nor_init(const struct device *dev)
 	}
 #endif /* ANY_INST_HAS_HOLD_GPIOS */
 
+#ifdef CONFIG_PM_DEVICE
 	if (!pm_device_driver_init(dev, spi_nor_pm_control))
 	{
 		return -ENODEV;
 	}
+#endif
 
 #ifdef CONFIG_SPI_NOR_SMART_IDLE
 	driver_data->dev = dev;
