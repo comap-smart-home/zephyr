@@ -72,6 +72,10 @@ void pm_system_resume(void)
 {
 	uint8_t id = _current_cpu->id;
 
+#ifdef CONFIG_SYS_CLOCK_EXISTS
+	sys_clock_idle_exit();
+#endif /* CONFIG_SYS_CLOCK_EXISTS */
+
 	/*
 	 * This notification is called from the ISR of the event
 	 * that caused exit from kernel idling after PM operations.
@@ -95,9 +99,6 @@ void pm_system_resume(void)
 #endif
 		pm_state_exit_post_ops(z_cpus_pm_state[id].state, z_cpus_pm_state[id].substate_id);
 		pm_state_notify(false);
-#ifdef CONFIG_SYS_CLOCK_EXISTS
-		sys_clock_idle_exit();
-#endif /* CONFIG_SYS_CLOCK_EXISTS */
 		z_cpus_pm_state[id] = (struct pm_state_info){PM_STATE_ACTIVE,
 			0, 0};
 	}
