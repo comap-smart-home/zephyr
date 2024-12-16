@@ -148,11 +148,6 @@ static void rx_fall_callback_handler(const struct device *port,
 	const struct uart_stm32_config *config = dev->config;
 	int rc;
 
-	rc = gpio_pin_interrupt_configure_dt(&config->rx_spec, GPIO_INT_DISABLE);
-	if (rc) {
-		LOG_ERR("Can't deactivate (LP)UART interrupt");
-	}
-
 	rc = k_work_schedule(&data->stay_awake_work, K_MSEC(config->stay_awake_time_ms));
 	if (rc < 0) {
 		LOG_ERR("Error while scheduling work");
@@ -223,6 +218,23 @@ static int uart_stm32_stay_awake_from_pm_suspend(const struct device *dev)
 	}
 	return 0;
 }
+
+static int uart_stm32_stay_awake_from_pm_resume(const struct device *dev)
+{
+	const struct uart_stm32_config *config = dev->config;
+	int rc;
+
+	if (!uart_stm32_stay_awake_enabled(dev)) {
+		return 0;
+	}
+
+	rc = gpio_pin_interrupt_configure_dt(&config->rx_spec, GPIO_INT_MODE_DISABLE_ONLY);
+	if (rc) {
+		LOG_ERR("Can't deactivate (LP)UART interrupt");
+	}
+	return 0;
+}
+
 #elif defined(CONFIG_PM_DEVICE)
 
 static bool uart_stm32_stay_awake_enabled(const struct device *dev)
@@ -2295,6 +2307,10 @@ static int uart_stm32_pm_action(const struct device *dev,
 
 	switch (action) {
 	case PM_DEVICE_ACTION_RESUME:
+		err = uart_stm32_stay_awake_from_pm_resume(dev);
+		if (err) {
+			return err;
+		}
 		/* Set pins to active state */
 		err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
 		if (err < 0) {
