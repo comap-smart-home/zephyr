@@ -68,7 +68,6 @@ K_MUTEX_DEFINE(lorawan_send_mutex);
  */
 static enum lorawan_datarate default_datarate;
 static enum lorawan_datarate current_datarate;
-static bool lorawan_adr_enable;
 
 static sys_slist_t dl_callbacks;
 
@@ -93,6 +92,14 @@ void *dr_change_user_data = NULL;
 void BoardGetUniqueId(uint8_t *id)
 {
 	/* Do not change the default value */
+}
+
+static bool lorawan_is_adr_enabled(void)
+{
+	MibRequestConfirm_t mib_req;
+	mib_req.Type = MIB_ADR;
+	LoRaMacMibGetRequestConfirm(&mib_req);
+	return mib_req.Param.AdrEnable;
 }
 
 static uint8_t get_battery_level(void)
@@ -139,7 +146,7 @@ static void mcps_confirm_handler(McpsConfirm_t *mcps_confirm)
 	}
 
 	/* Datarate may have changed due to a missed ADRACK */
-	if (lorawan_adr_enable) {
+	if (lorawan_is_adr_enabled()) {
 		datarate_observe(false);
 	}
 
@@ -160,7 +167,7 @@ static void mcps_indication_handler(McpsIndication_t *mcps_indication)
 	}
 
 	/* Datarate can change as result of ADR command from server */
-	if (lorawan_adr_enable) {
+	if (lorawan_is_adr_enabled()) {
 		datarate_observe(false);
 	}
 
@@ -442,7 +449,7 @@ out:
 		 * performed when ADR is disabled as it the network servers
 		 * responsibility to increase datarates when ADR is enabled.
 		 */
-		if (!lorawan_adr_enable) {
+		if (!lorawan_is_adr_enabled()) {
 			MibRequestConfirm_t mib_req2;
 
 			mib_req2.Type = MIB_CHANNELS_DATARATE;
@@ -522,7 +529,7 @@ int lorawan_set_datarate(enum lorawan_datarate dr)
 	MibRequestConfirm_t mib_req;
 
 	/* Bail out if using ADR */
-	if (lorawan_adr_enable) {
+	if (lorawan_is_adr_enabled()) {
 		return -EINVAL;
 	}
 
@@ -562,17 +569,14 @@ enum lorawan_datarate lorawan_get_min_datarate(void)
 	return mib_req.Param.ChannelsMinTxDatarate;
 }
 
+
 void lorawan_enable_adr(bool enable)
 {
 	MibRequestConfirm_t mib_req;
 
-	if (enable != lorawan_adr_enable) {
-		lorawan_adr_enable = enable;
-
-		mib_req.Type = MIB_ADR;
-		mib_req.Param.AdrEnable = lorawan_adr_enable;
-		LoRaMacMibSetRequestConfirm(&mib_req);
-	}
+	mib_req.Type = MIB_ADR;
+	mib_req.Param.AdrEnable = enable;
+	LoRaMacMibSetRequestConfirm(&mib_req);
 }
 
 int lorawan_set_conf_msg_tries(uint8_t tries)
