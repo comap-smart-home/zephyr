@@ -1382,18 +1382,19 @@ static void uart_stm32_isr(const struct device *dev)
 	}
 #endif
 
-#ifdef CONFIG_UART_INTERRUPT_DRIVEN
-	if (data->user_cb) {
-		data->user_cb(dev, data->user_data);
-	}
-#endif /* CONFIG_UART_INTERRUPT_DRIVEN */
-
 #ifdef CONFIG_UART_STAY_AWAKE
 	if (LL_USART_IsEnabledIT_RXNE(usart) &&
 			LL_USART_IsActiveFlag_RXNE(usart)) {
 		uart_stm32_stay_awake_on_rx(dev);
 	}
 #endif
+
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+	if (data->user_cb) {
+		data->user_cb(dev, data->user_data);
+	}
+#endif /* CONFIG_UART_INTERRUPT_DRIVEN */
+
 
 #ifdef CONFIG_UART_ASYNC_API
 	if (LL_USART_IsEnabledDMAReq_RX(usart) || LL_USART_IsEnabledDMAReq_RX(usart)) {
